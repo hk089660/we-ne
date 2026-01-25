@@ -1,0 +1,955 @@
+{
+  "address": "8SVRtAyWXcd47PKeeMSGpC1oQFNt2yM865M46QgjKUZ",
+  "metadata": {
+    "name": "grant_program",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "claim_grant",
+      "docs": [
+        "受給（期間内1回のみ）"
+      ],
+      "discriminator": [
+        125,
+        134,
+        233,
+        135,
+        82,
+        18,
+        177,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant.authority",
+                "account": "Grant"
+              },
+              {
+                "kind": "account",
+                "path": "grant.mint",
+                "account": "Grant"
+              },
+              {
+                "kind": "account",
+                "path": "grant.grant_id",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claimer",
+          "docs": [
+            "受給者"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "claimer_ata",
+          "docs": [
+            "受給先（ATAなど）"
+          ],
+          "writable": true
+        },
+        {
+          "name": "receipt",
+          "docs": [
+            "期間内1回の受給を保証するレシート"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              },
+              {
+                "kind": "account",
+                "path": "claimer"
+              },
+              {
+                "kind": "arg",
+                "path": "period_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "period_index",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_grant_with_proof",
+      "docs": [
+        "allowlist（Merkle）を用いた受給",
+        "- Grant に merkle_root が設定されている場合はこちらを使用"
+      ],
+      "discriminator": [
+        2,
+        28,
+        65,
+        86,
+        182,
+        174,
+        167,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant.authority",
+                "account": "Grant"
+              },
+              {
+                "kind": "account",
+                "path": "grant.mint",
+                "account": "Grant"
+              },
+              {
+                "kind": "account",
+                "path": "grant.grant_id",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "claimer",
+          "docs": [
+            "受給者"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "claimer_ata",
+          "docs": [
+            "受給先（ATAなど）"
+          ],
+          "writable": true
+        },
+        {
+          "name": "receipt",
+          "docs": [
+            "期間内1回の受給を保証するレシート"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              },
+              {
+                "kind": "account",
+                "path": "claimer"
+              },
+              {
+                "kind": "arg",
+                "path": "period_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "period_index",
+          "type": "u64"
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "close_grant",
+      "docs": [
+        "終了・返金（vaultの残高を回収し、vaultをcloseする）"
+      ],
+      "discriminator": [
+        70,
+        22,
+        221,
+        111,
+        171,
+        253,
+        39,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "grant.grant_id",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority_ata",
+          "docs": [
+            "返金先（authorityのATA）"
+          ],
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "grant"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_grant",
+      "docs": [
+        "Grant（給付キャンペーン）を作成する",
+        "- mint: 配布するSPLトークン",
+        "- amount_per_period: 1期間あたりの配布量（最小単位）",
+        "- period_seconds: 期間秒（MVPは月次=2,592,000を推奨）",
+        "- start_ts: 期間計算の起点（unix timestamp）",
+        "- expires_at: 期限（0なら無期限）",
+        "",
+        "NOTE: 固定レート方式のため「円換算」はオフチェーン運用ルール。"
+      ],
+      "discriminator": [
+        19,
+        119,
+        176,
+        223,
+        45,
+        142,
+        225,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "arg",
+                "path": "grant_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "docs": [
+            "Program-owned vault (TokenAccount). Authority is the grant PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "grant_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount_per_period",
+          "type": "u64"
+        },
+        {
+          "name": "period_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "start_ts",
+          "type": "i64"
+        },
+        {
+          "name": "expires_at",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "fund_grant",
+      "docs": [
+        "原資入金（追加入金も可能）"
+      ],
+      "discriminator": [
+        158,
+        103,
+        33,
+        88,
+        57,
+        190,
+        48,
+        233
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "grant.grant_id",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "from_ata",
+          "docs": [
+            "入金元（ATAなど）"
+          ],
+          "writable": true
+        },
+        {
+          "name": "funder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Grant作成者（has_oneのため）"
+          ],
+          "relations": [
+            "grant"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_allowlist_root",
+      "docs": [
+        "allowlist を設定（任意）",
+        "- merkle_root が [0;32] の場合は allowlist 無効（誰でも受給可能）",
+        "- それ以外の場合は allowlist 有効（proof を伴う claim が必要）"
+      ],
+      "discriminator": [
+        145,
+        238,
+        252,
+        173,
+        15,
+        3,
+        94,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "grant.grant_id",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "grant"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "merkle_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "一時停止/再開（運用自由度）"
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "grant",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              },
+              {
+                "kind": "account",
+                "path": "grant.grant_id",
+                "account": "Grant"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "grant"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "ClaimReceipt",
+      "discriminator": [
+        223,
+        233,
+        11,
+        229,
+        124,
+        165,
+        207,
+        28
+      ]
+    },
+    {
+      "name": "Grant",
+      "discriminator": [
+        161,
+        166,
+        11,
+        205,
+        204,
+        135,
+        205,
+        54
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Unauthorized"
+    },
+    {
+      "code": 6001,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidAmount",
+      "msg": "Invalid amount"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidPeriod",
+      "msg": "Invalid period"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidStartTs",
+      "msg": "Invalid start timestamp"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidPeriodIndex",
+      "msg": "Invalid period index"
+    },
+    {
+      "code": 6006,
+      "name": "MintMismatch",
+      "msg": "Mint mismatch"
+    },
+    {
+      "code": 6007,
+      "name": "Paused",
+      "msg": "Grant is paused"
+    },
+    {
+      "code": 6008,
+      "name": "GrantExpired",
+      "msg": "Grant expired"
+    },
+    {
+      "code": 6009,
+      "name": "GrantNotStarted",
+      "msg": "Grant not started"
+    },
+    {
+      "code": 6010,
+      "name": "MathOverflow",
+      "msg": "Math overflow"
+    },
+    {
+      "code": 6011,
+      "name": "AllowlistRequired",
+      "msg": "Allowlist is required for this grant"
+    },
+    {
+      "code": 6012,
+      "name": "AllowlistNotEnabled",
+      "msg": "Allowlist is not enabled"
+    },
+    {
+      "code": 6013,
+      "name": "NotInAllowlist",
+      "msg": "Claimer is not in allowlist"
+    }
+  ],
+  "types": [
+    {
+      "name": "ClaimReceipt",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "grant",
+            "type": "pubkey"
+          },
+          {
+            "name": "claimer",
+            "type": "pubkey"
+          },
+          {
+            "name": "period_index",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Grant",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "grant_id",
+            "type": "u64"
+          },
+          {
+            "name": "amount_per_period",
+            "type": "u64"
+          },
+          {
+            "name": "period_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "merkle_root",
+            "docs": [
+              "allowlist Merkle root. [0;32] means disabled."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

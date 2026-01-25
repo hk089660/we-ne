@@ -1,8 +1,9 @@
+#![allow(deprecated)]
+
 use anchor_lang::prelude::*;
 
 declare_id!("8SVRtAyWXcd47PKeeMSGpC1oQFNt2yM865M46QgjKUZ");
 use anchor_spl::token::{
-    self,
     close_account,
     transfer_checked,
     CloseAccount,
@@ -94,58 +95,26 @@ pub mod grant_program {
         // allowlist が有効な場合は proof 付きの claim を要求
         require!(grant.merkle_root == [0u8; 32], ErrorCode::AllowlistRequired);
 
-        if grant.expires_at != 0 {
-            require!(now <= grant.expires_at, ErrorCode::GrantExpired);
-        }
-
-        require!(now >= grant.start_ts, ErrorCode::GrantNotStarted);
-
-        // period_index はクライアントから渡される（receipt PDA の seed 用）
-        // 不正防止のため、オンチェーンで現在の period_index を再計算して一致を要求
-        let elapsed = now
-            .checked_sub(grant.start_ts)
-            .ok_or(ErrorCode::MathOverflow)?;
-        let expected_period_index = (elapsed / grant.period_seconds) as u64;
-        require!(period_index == expected_period_index, ErrorCode::InvalidPeriodIndex);
-
+        require_claim_timing(grant, now, period_index)?;
         // receipt PDA の seed に period_index が含まれているため
         // 同じ期間に2回目のclaimをしようとすると init が失敗し、二重受給が防げる
         // （receipt作成は Accounts 側で init される）
 
-        // vault 残高チェック
-        require!(ctx.accounts.vault.amount >= grant.amount_per_period, ErrorCode::InsufficientFunds);
-
-        // vault -> claimer_ata へ送金（vault authority は grant PDA）
-        let grant_seeds: &[&[u8]] = &[
-            b"grant",
-            grant.authority.as_ref(),
-            grant.mint.as_ref(),
-            &grant.grant_id.to_le_bytes(),
-            &[grant.bump],
-        ];
-
-        let decimals = ctx.accounts.mint.decimals;
-
-        let cpi_accounts = TransferChecked {
-            from: ctx.accounts.vault.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            to: ctx.accounts.claimer_ata.to_account_info(),
-            authority: ctx.accounts.grant.to_account_info(),
-        };
-        let signer_seeds: &[&[&[u8]]] = &[grant_seeds];
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-            signer_seeds,
+        transfer_from_vault(
+            &ctx.accounts.grant,
+            &ctx.accounts.vault,
+            &ctx.accounts.mint,
+            &ctx.accounts.claimer_ata,
+            &ctx.accounts.token_program,
+            grant.amount_per_period,
+        )?;
+        record_receipt(
+            &mut ctx.accounts.receipt,
+            grant.key(),
+            ctx.accounts.claimer.key(),
+            period_index,
+            now,
         );
-        transfer_checked(cpi_ctx, grant.amount_per_period, decimals)?;
-
-        // receipt に記録
-        let receipt = &mut ctx.accounts.receipt;
-        receipt.grant = grant.key();
-        receipt.claimer = ctx.accounts.claimer.key();
-        receipt.period_index = period_index;
-        receipt.claimed_at = now;
 
         Ok(())
     }
@@ -238,12 +207,6 @@ pub mod grant_program {
 
         require!(!grant.paused, ErrorCode::Paused);
 
-        if grant.expires_at != 0 {
-            require!(now <= grant.expires_at, ErrorCode::GrantExpired);
-        }
-
-        require!(now >= grant.start_ts, ErrorCode::GrantNotStarted);
-
         // allowlist が無効なら通常の claim を使えばよい
         require!(grant.merkle_root != [0u8; 32], ErrorCode::AllowlistNotEnabled);
 
@@ -254,48 +217,22 @@ pub mod grant_program {
             ErrorCode::NotInAllowlist
         );
 
-        // period_index はクライアントから渡される（receipt PDA の seed 用）
-        // 不正防止のため、オンチェーンで現在の period_index を再計算して一致を要求
-        let elapsed = now
-            .checked_sub(grant.start_ts)
-            .ok_or(ErrorCode::MathOverflow)?;
-        let expected_period_index = (elapsed / grant.period_seconds) as u64;
-        require!(period_index == expected_period_index, ErrorCode::InvalidPeriodIndex);
-
-        // vault 残高チェック
-        require!(ctx.accounts.vault.amount >= grant.amount_per_period, ErrorCode::InsufficientFunds);
-
-        // vault -> claimer_ata へ送金（vault authority は grant PDA）
-        let grant_seeds: &[&[u8]] = &[
-            b"grant",
-            grant.authority.as_ref(),
-            grant.mint.as_ref(),
-            &grant.grant_id.to_le_bytes(),
-            &[grant.bump],
-        ];
-
-        let decimals = ctx.accounts.mint.decimals;
-
-        let cpi_accounts = TransferChecked {
-            from: ctx.accounts.vault.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            to: ctx.accounts.claimer_ata.to_account_info(),
-            authority: ctx.accounts.grant.to_account_info(),
-        };
-        let signer_seeds: &[&[&[u8]]] = &[grant_seeds];
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-            signer_seeds,
+        require_claim_timing(grant, now, period_index)?;
+        transfer_from_vault(
+            &ctx.accounts.grant,
+            &ctx.accounts.vault,
+            &ctx.accounts.mint,
+            &ctx.accounts.claimer_ata,
+            &ctx.accounts.token_program,
+            grant.amount_per_period,
+        )?;
+        record_receipt(
+            &mut ctx.accounts.receipt,
+            grant.key(),
+            ctx.accounts.claimer.key(),
+            period_index,
+            now,
         );
-        transfer_checked(cpi_ctx, grant.amount_per_period, decimals)?;
-
-        // receipt に記録
-        let receipt = &mut ctx.accounts.receipt;
-        receipt.grant = grant.key();
-        receipt.claimer = ctx.accounts.claimer.key();
-        receipt.period_index = period_index;
-        receipt.claimed_at = now;
 
         Ok(())
     }
@@ -307,7 +244,7 @@ pub mod grant_program {
 #[instruction(grant_id: u64)]
 pub struct CreateGrant<'info> {
     #[account(
-        init,
+        init_if_needed,
         payer = authority,
         space = 8 + Grant::INIT_SPACE,
         seeds = [b"grant", authority.key().as_ref(), mint.key().as_ref(), &grant_id.to_le_bytes()],
@@ -319,7 +256,7 @@ pub struct CreateGrant<'info> {
 
     /// Program-owned vault (TokenAccount). Authority is the grant PDA.
     #[account(
-        init,
+        init_if_needed,
         payer = authority,
         token::mint = mint,
         token::authority = grant,
@@ -405,7 +342,7 @@ pub struct ClaimGrant<'info> {
 
     /// 期間内1回の受給を保証するレシート
     #[account(
-        init,
+        init_if_needed,
         payer = claimer,
         space = 8 + ClaimReceipt::INIT_SPACE,
         seeds = [
@@ -529,6 +466,69 @@ impl ClaimReceipt {
 }
 
 // ===== Helpers =====
+
+fn require_claim_timing(grant: &Grant, now: i64, period_index: u64) -> Result<()> {
+    if grant.expires_at != 0 {
+        require!(now <= grant.expires_at, ErrorCode::GrantExpired);
+    }
+
+    require!(now >= grant.start_ts, ErrorCode::GrantNotStarted);
+
+    // period_index はクライアントから渡される（receipt PDA の seed 用）
+    // 不正防止のため、オンチェーンで現在の period_index を再計算して一致を要求
+    let elapsed = now
+        .checked_sub(grant.start_ts)
+        .ok_or(ErrorCode::MathOverflow)?;
+    let expected_period_index = (elapsed / grant.period_seconds) as u64;
+    require!(period_index == expected_period_index, ErrorCode::InvalidPeriodIndex);
+
+    Ok(())
+}
+
+fn transfer_from_vault<'info>(
+    grant_account: &Account<'info, Grant>,
+    vault: &Account<'info, TokenAccount>,
+    mint: &Account<'info, Mint>,
+    destination: &Account<'info, TokenAccount>,
+    token_program: &Program<'info, Token>,
+    amount: u64,
+) -> Result<()> {
+    require!(vault.amount >= amount, ErrorCode::InsufficientFunds);
+
+    let grant_id_bytes = grant_account.grant_id.to_le_bytes();
+    let grant_seeds: &[&[u8]] = &[
+        b"grant",
+        grant_account.authority.as_ref(),
+        grant_account.mint.as_ref(),
+        &grant_id_bytes,
+        &[grant_account.bump],
+    ];
+
+    let decimals = mint.decimals;
+
+    let cpi_accounts = TransferChecked {
+        from: vault.to_account_info(),
+        mint: mint.to_account_info(),
+        to: destination.to_account_info(),
+        authority: grant_account.to_account_info(),
+    };
+    let signer_seeds: &[&[&[u8]]] = &[grant_seeds];
+    let cpi_ctx = CpiContext::new_with_signer(token_program.to_account_info(), cpi_accounts, signer_seeds);
+    transfer_checked(cpi_ctx, amount, decimals)
+}
+
+fn record_receipt(
+    receipt: &mut Account<ClaimReceipt>,
+    grant: Pubkey,
+    claimer: Pubkey,
+    period_index: u64,
+    claimed_at: i64,
+) {
+    receipt.grant = grant;
+    receipt.claimer = claimer;
+    receipt.period_index = period_index;
+    receipt.claimed_at = claimed_at;
+}
 
 
 // ===== Allowlist (Merkle) helpers =====

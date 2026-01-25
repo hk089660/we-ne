@@ -256,7 +256,7 @@ describe("grant_program (PDA)", () => {
         funder: authority.publicKey,
         authority: authority.publicKey,
         tokenProgram: TOKEN_PROGRAM_ID,
-      })
+      } as any)
       .rpc();
 
     const claimerAta = await getOrCreateAssociatedTokenAccount(

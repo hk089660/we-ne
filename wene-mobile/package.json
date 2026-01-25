@@ -1,0 +1,48 @@
+{
+  "name": "wene-mobile",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "start:clear": "expo start --clear",
+    "start:reset": "EXPO_NO_CACHE=1 expo start --clear --reset-cache",
+    "android": "expo run:android",
+    "android:clear": "expo start --android --clear",
+    "android:reset": "EXPO_NO_CACHE=1 expo start --android --clear --reset-cache",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "clean": "rm -rf .expo node_modules/.cache .metro && npm run start:reset",
+    "build:prebuild": "expo prebuild --platform android --clean",
+    "build:prebuild:ios": "expo prebuild --platform ios --clean",
+    "build:apk": "cd android && echo \"sdk.dir=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}\" > local.properties && JAVA_HOME=\"${JAVA_HOME:-/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home}\" ANDROID_HOME=\"${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}\" ./gradlew assembleRelease",
+    "build:ios": "expo run:ios",
+    "build:ios:simulator": "expo run:ios"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "bs58": "^6.0.0",
+    "buffer": "^6.0.3",
+    "expo": "~54.0.0",
+    "expo-constants": "~18.0.13",
+    "expo-linking": "~8.0.11",
+    "expo-router": "~6.0.22",
+    "expo-status-bar": "~3.0.9",
+    "expo-web-browser": "^15.0.10",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "tweetnacl": "^1.0.3",
+    "zustand": "^5.0.10"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  },
+  "private": true,
+  "packageManager": "yarn@4.12.0+sha512.f45ab632439a67f8bc759bf32ead036a1f413287b9042726b7cc4818b7b49e14e9423ba49b18f9e06ea4941c1ad062385b1d8760a8d5091a1a31e5f6219afca8"
+}
