@@ -1,57 +1,69 @@
 # We-ne Mobile
 
-React Native（Expo + TypeScript）アプリ - 受給者向けUI
+[日本語版 README はこちら](./README.ja.md)
 
-## セットアップ
+Recipient-facing UI built with React Native (Expo + TypeScript)
+
+## Setup
 
 ```bash
-# 依存関係のインストール
+# Install dependencies
 npm install
 
-# アプリの起動
+# Start the app
 npm start
 ```
 
-## ディレクトリ構成
+## Directory Structure
 
 ```
 wene-mobile/
 ├── app/
-│   ├── _layout.tsx          # ルートレイアウト（Stack、header非表示）
-│   ├── index.tsx            # 受給者ホーム画面
+│   ├── _layout.tsx          # Root layout (Stack, hidden header)
+│   ├── index.tsx            # Recipient home screen
+│   ├── phantom/
+│   │   └── [action].tsx     # Phantom wallet redirect handler
 │   └── r/
-│       └── [campaignId].tsx # 受給画面
-├── app.config.ts            # Expo設定（deeplink含む）
+│       └── [campaignId].tsx # Claim screen
+├── assets/
+│   ├── icon.png             # App icon (1024x1024)
+│   ├── adaptive-icon.png    # Android adaptive icon
+│   ├── splash.png           # Splash screen image
+│   └── icon-source.png      # Source image for icon generation
+├── scripts/
+│   ├── generate-icons.js    # Icon generation script
+│   └── deploy-via-adb.sh    # ADB deployment script
+├── app.config.ts            # Expo configuration (deeplinks included)
 ├── package.json
 └── tsconfig.json
 ```
 
-## Deeplink
+## Deep Links
 
 ### Custom Scheme
 - Scheme: `wene`
-- 形式: `wene://r/<campaignId>?code=...`
-- 例: `wene://r/demo-campaign?code=demo-invite`
+- Format: `wene://r/<campaignId>?code=...`
+- Example: `wene://r/demo-campaign?code=demo-invite`
 
 ### Universal Links / App Links (HTTPS)
 - URL: `https://wene.app/r/<campaignId>?code=...`
-- 例: `https://wene.app/r/demo-campaign?code=demo-invite`
-- iOS: Universal Links（associatedDomains設定済み）
-- Android: App Links（intentFilters設定済み）
+- Example: `https://wene.app/r/demo-campaign?code=demo-invite`
+- iOS: Universal Links (associatedDomains configured)
+- Android: App Links (intentFilters configured)
 
-## Universal Links / App Links の設定
+## Universal Links / App Links Configuration
 
 ### iOS: Apple App Site Association (AASA)
 
-**必要な理由:**
-iOSでUniversal Linksを動作させるには、ドメイン（wene.app）のルートにAASAファイルを配置する必要があります。iOSがこのファイルを検証して、アプリがそのドメインのリンクを処理できることを確認します。
+**Why it's needed:**
+To enable Universal Links on iOS, you need to place an AASA file at the root of your domain (wene.app). iOS validates this file to confirm the app can handle links from that domain.
 
-**配置場所:**
+**Location:**
 - `https://wene.app/.well-known/apple-app-site-association`
-- HTTPSでアクセス可能である必要があります
-- Content-Type: `application/json` で配信する必要があります
+- Must be accessible via HTTPS
+- Must be served with Content-Type: `application/json`
 
-**必要な値:**
+**Required content:**
 ```json
 {
   "applinks": {
@@ -65,20 +77,20 @@ iOSでUniversal Linksを動作させるには、ドメイン（wene.app）のル
   }
 }
 ```
-- `TEAM_ID`: Apple DeveloperアカウントのTeam ID（10文字の英数字）
-- `paths`: アプリで処理するパスパターン（`/r/*`で/r/で始まるすべてのパスを処理）
+- `TEAM_ID`: Your Apple Developer account Team ID (10 alphanumeric characters)
+- `paths`: Path patterns the app handles (`/r/*` handles all paths starting with /r/)
 
 ### Android: Digital Asset Links (assetlinks.json)
 
-**必要な理由:**
-AndroidでApp Linksを動作させるには、ドメイン（wene.app）のルートにassetlinks.jsonファイルを配置する必要があります。Androidがこのファイルを検証して、アプリがそのドメインのリンクを処理できることを確認します。
+**Why it's needed:**
+To enable App Links on Android, you need to place an assetlinks.json file at the root of your domain (wene.app). Android validates this file to confirm the app can handle links from that domain.
 
-**配置場所:**
+**Location:**
 - `https://wene.app/.well-known/assetlinks.json`
-- HTTPSでアクセス可能である必要があります
-- Content-Type: `application/json` で配信する必要があります
+- Must be accessible via HTTPS
+- Must be served with Content-Type: `application/json`
 
-**必要な値:**
+**Required content:**
 ```json
 [{
   "relation": ["delegate_permission/common.handle_all_urls"],
@@ -91,187 +103,215 @@ AndroidでApp Linksを動作させるには、ドメイン（wene.app）のル�
   }
 }]
 ```
-- `package_name`: app.config.tsで設定した`jp.wene.app`
-- `sha256_cert_fingerprints`: アプリの署名証明書のSHA256フィンガープリント（リリースビルド用とデバッグビルド用の両方を設定可能）
+- `package_name`: `jp.wene.app` as configured in app.config.ts
+- `sha256_cert_fingerprints`: SHA256 fingerprint of your app's signing certificate (both release and debug can be configured)
 
-**フィンガープリントの取得方法:**
+**Getting the fingerprint:**
 ```bash
-# リリースキーストアの場合
+# For release keystore
 keytool -list -v -keystore your-release-key.keystore -alias your-key-alias
 
-# デバッグキーストアの場合
+# For debug keystore
 keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
 ```
 
-**注意事項:**
-- AASAとassetlinks.jsonは、HTTPSで配信され、正しいContent-Typeヘッダーが必要です
-- ファイルはリダイレクトなしで直接アクセス可能である必要があります
-- iOSはAASAファイルをキャッシュするため、変更後は反映に時間がかかる場合があります
-- AndroidはApp Linksの検証を実行時に行うため、初回起動時にインターネット接続が必要です
+**Notes:**
+- Both AASA and assetlinks.json must be served via HTTPS with correct Content-Type headers
+- Files must be directly accessible without redirects
+- iOS caches AASA files, so changes may take time to reflect
+- Android validates App Links at runtime, requiring internet connection on first launch
 
-## 画面仕様
+## Screen Specifications
 
-### ホーム画面（app/index.tsx）
-- 白背景
-- タイトル「We-ne」
-- 説明文「支援クレジットを受け取る」
-- デモリンクボタン
+### Home Screen (app/index.tsx)
+- White background
+- Title: "We-ne"
+- Description: "Receive support credits"
+- Demo link button
 
-### 受給画面（app/r/[campaignId].tsx）
-- URLパラメータから `campaignId` と `code` を取得
-- カード形式で情報を表示
-- 「受け取る（仮）」ボタン
+### Claim Screen (app/r/[campaignId].tsx)
+- Gets `campaignId` and `code` from URL parameters
+- Displays information in card format
+- "Claim" button
 
-## デザインルール
+## Design Rules
 
-- 白黒＋グレーのみ
-- 影は使わない
-- 角丸はやや大きめ（16px）
-- 1画面1アクション
+- Black, white, and gray only
+- No shadows
+- Slightly large border radius (16px)
+- One action per screen
 
-## APK の書き出し
+## App Icon
 
-### 前提条件
+### Custom Icon Setup
 
-- **Java 17**: Gradle 8 は Java 25 非対応のため、Java 17 を使用してください。
-  - macOS (Homebrew): `brew install openjdk@17`
-- **Android SDK**: `platform-tools`, `platforms;android-36`, `build-tools;36.0.0` が必要です。
-  - macOS (Homebrew): `brew install --cask android-commandlinetools` ののち、`sdkmanager` で上記をインストール。
-- 未導入時は `ANDROID_HOME` と `JAVA_HOME` をそれぞれ設定してください。
+1. Save your icon image as `assets/icon-source.png` (1024x1024 recommended)
+2. Run the icon generation script:
+```bash
+npm run generate-icons
+```
 
-### 手順
+This generates:
+- `icon.png` - Main app icon
+- `adaptive-icon.png` - Android adaptive icon
+- `favicon.png` - Web favicon
+- `splash.png` - Splash screen image
+
+### Deploy to Device via ADB
 
 ```bash
-# 1. 初回のみ: ネイティブ Android プロジェクトを生成
+npm run deploy:adb
+```
+
+This script:
+1. Generates icons from `icon-source.png`
+2. Runs prebuild (reflects icons in Android resources)
+3. Builds APK
+4. Installs to connected device via ADB
+
+## Building APK
+
+### Prerequisites
+
+- **Java 17**: Gradle 8 doesn't support Java 25, so use Java 17.
+  - macOS (Homebrew): `brew install openjdk@17`
+- **Android SDK**: Requires `platform-tools`, `platforms;android-36`, `build-tools;36.0.0`.
+  - macOS (Homebrew): `brew install --cask android-commandlinetools`, then install the above via `sdkmanager`.
+- Set `ANDROID_HOME` and `JAVA_HOME` if not already configured.
+
+### Steps
+
+```bash
+# 1. First time only: Generate native Android project
 npm run build:prebuild
 
-# 2. APK をビルド（Java 17 と Android SDK を使用）
+# 2. Build APK (uses Java 17 and Android SDK)
 npm run build:apk
 ```
 
-出力先: `android/app/build/outputs/apk/release/app-release.apk`
+Output: `android/app/build/outputs/apk/release/app-release.apk`
 
-Homebrew で Java 17 と Android コマンドラインツールを入れている場合は、そのまま `npm run build:apk` でビルドできます。別のパスを使う場合は、ビルド前に `JAVA_HOME` と `ANDROID_HOME` を設定してください。
+If you installed Java 17 and Android command-line tools via Homebrew, `npm run build:apk` should work directly. For different paths, set `JAVA_HOME` and `ANDROID_HOME` before building.
 
-### ターミナルが落ちる／ビルドを再試行したい場合
+### If Terminal Closes / Retrying Build
 
-**新しいターミナル**を開き、以下を実行してください。
+Open a **new terminal** and run:
 
 ```bash
 cd wene-mobile
 ./scripts/build-apk.sh
-# または
+# or
 npm run build:apk
 ```
 
-### APK インストール時の注意点
+### APK Installation Notes
 
-**更新が反映されない場合:**
+**If updates don't reflect:**
 
-1. **既存のアプリをアンインストール**
-   - 設定 > アプリ > wene-mobile（または jp.wene.app）> アンインストール
-   - または `adb uninstall jp.wene.app`（USB接続時）
+1. **Uninstall existing app**
+   - Settings > Apps > wene-mobile (or jp.wene.app) > Uninstall
+   - Or `adb uninstall jp.wene.app` (when connected via USB)
 
-2. **新しいAPKをインストール**
-   - ファイルマネージャーでAPKを開く
-   - または `adb install android/app/build/outputs/apk/release/app-release.apk`
+2. **Install new APK**
+   - Open APK in file manager
+   - Or `adb install android/app/build/outputs/apk/release/app-release.apk`
 
-**理由:**
-- `versionCode` が同じ場合、Androidは更新と認識しません
-- 異なる署名（例：Expo Go経由でインストール）の場合、上書きインストールできません
-- `app.config.ts` で `versionCode` を自動更新するように設定済みですが、既存のアプリが古い `versionCode` の場合はアンインストールが必要です
+**Reasons:**
+- Android won't recognize as update if `versionCode` is the same
+- Can't overwrite if signed differently (e.g., installed via Expo Go)
+- `app.config.ts` auto-updates `versionCode`, but uninstall may be needed for older versions
 
-## iOS ローカルビルド（Simulator）
+## iOS Local Build (Simulator)
 
-### 前提条件
+### Prerequisites
 
-- **Xcodeアプリ**がインストールされている必要があります（App Storeからインストール、約12GB）
-- Command Line Toolsだけでは不十分です
-- インストール後: `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` を実行
+- **Xcode app** must be installed (from App Store, ~12GB)
+- Command Line Tools alone is insufficient
+- After installation: Run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
 
-**確認方法:**
+**Verification:**
 ```bash
 xcode-select -p
-# 正しい場合: /Applications/Xcode.app/Contents/Developer
-# 間違っている場合: /Library/Developer/CommandLineTools（Xcodeアプリが必要）
+# Correct: /Applications/Xcode.app/Contents/Developer
+# Wrong: /Library/Developer/CommandLineTools (Xcode app needed)
 ```
 
-### ローカルビルド手順
+### Local Build Steps
 
 ```bash
 cd wene-mobile
 ./scripts/build-ios.sh
-# または
+# or
 npm run build:ios
 ```
 
-- 初回は `expo prebuild --platform ios --clean` 相当の処理が走ります（`ios/` がない場合）。
-- その後 `expo run:ios` で Simulator にビルド・起動します。
+- First run executes `expo prebuild --platform ios --clean` equivalent (if `ios/` doesn't exist).
+- Then `expo run:ios` builds and launches on Simulator.
 
-**ターミナルが落ちる／再試行したい場合:** 新しいターミナルを開き、上記コマンドを再実行してください。
+**If terminal closes / retrying:** Open a new terminal and re-run the commands above.
 
-### Xcodeがインストールされていない場合
+### Without Xcode Installed
 
-**EAS Build（クラウドビルド）を使用:**
+**Use EAS Build (cloud build):**
 ```bash
-# 1. EAS CLIのインストールとログイン
+# 1. Install EAS CLI and login
 npm install -g eas-cli
 eas login
 
-# 2. EASプロジェクトの初期化（初回のみ）
+# 2. Initialize EAS project (first time only)
 eas init
 
-# 3. iOS Simulator用ビルド
+# 3. Build for iOS Simulator
 eas build --platform ios --profile development
 ```
 
-詳細は `DEBUG_REPORT.md` の「iOS Simulator対応」セクションを参照してください。
+See the "iOS Simulator Support" section in `DEBUG_REPORT.md` for details.
 
-## トラブルシューティング
+## Troubleshooting
 
-### Expo GoでAndroid上に更新が反映されない場合
+### Updates Not Reflecting on Android via Expo Go
 
-以下の手順を順番に試してください：
+Try these steps in order:
 
-#### 方法1: キャッシュをクリア（推奨）
+#### Method 1: Clear Cache (Recommended)
 ```bash
 npm run start:clear
-# または
+# or
 npm run android:clear
 ```
 
-#### 方法2: 完全リセット（方法1で解決しない場合）
+#### Method 2: Full Reset (if Method 1 doesn't work)
 ```bash
 npm run start:reset
-# または
+# or
 npm run android:reset
 ```
 
-#### 方法3: すべてのキャッシュを削除（方法2で解決しない場合）
+#### Method 3: Delete All Caches (if Method 2 doesn't work)
 ```bash
 npm run clean
 ```
 
-その後、Androidデバイスで：
-1. **Expo Goアプリを完全に閉じる**
-   - 最近使用したアプリ一覧からExpo Goをスワイプして閉じる
-   - または、設定 > アプリ > Expo Go > 強制停止
+Then on your Android device:
+1. **Completely close Expo Go**
+   - Swipe Expo Go away from recent apps
+   - Or Settings > Apps > Expo Go > Force Stop
 
-2. **Expo Goアプリを再起動**
-   - アプリを開き直し、QRコードをスキャンして再接続
+2. **Restart Expo Go**
+   - Reopen the app and scan QR code to reconnect
 
-3. **手動でリロード**
-   - Expo Goアプリ内で、デバイスをシェイクするか、メニューから「Reload」を選択
+3. **Manual Reload**
+   - In Expo Go, shake device or select "Reload" from menu
 
-#### 方法4: ネットワーク接続を確認
-- Androidデバイスと開発マシンが同じWi-Fiネットワークに接続されていることを確認
-- ファイアウォールやVPNが開発サーバーへの接続をブロックしていないか確認
-- USBデバッグ経由で接続する場合：`adb reverse tcp:8081 tcp:8081` を実行
+#### Method 4: Check Network Connection
+- Ensure Android device and development machine are on the same Wi-Fi network
+- Check if firewall or VPN is blocking connection to dev server
+- For USB debugging: Run `adb reverse tcp:8081 tcp:8081`
 
-#### 方法5: 開発サーバーのログを確認
-- 開発サーバーのターミナルでエラーメッセージがないか確認
-- AndroidデバイスでExpo Goアプリのログを確認（設定 > デバッグ > ログを表示）
+#### Method 5: Check Dev Server Logs
+- Check terminal for error messages from dev server
+- Check Expo Go app logs on Android device (Settings > Debug > Show Logs)
 
-#### 補足情報
-- `app.config.ts`は開発時に自動的にバージョンが更新されるため、手動で変更する必要はありません
-- それでも更新されない場合は、Expo Goアプリ自体を再インストールしてみてください
+#### Additional Notes
+- `app.config.ts` auto-updates version during development, no manual changes needed
+- If still not updating, try reinstalling Expo Go itself
