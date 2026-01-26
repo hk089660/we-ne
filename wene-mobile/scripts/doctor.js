@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -21,6 +22,7 @@ const colors = {
   green: '\x1b[32m',
   yellow: '\x1b[33m',
   blue: '\x1b[34m',
+  magenta: '\x1b[35m',
   reset: '\x1b[0m',
 };
 
@@ -30,129 +32,170 @@ const log = {
   warn: (msg) => console.log(`${colors.yellow}⚠ ${msg}${colors.reset}`),
   info: (msg) => console.log(`${colors.blue}ℹ ${msg}${colors.reset}`),
   fix: (msg) => console.log(`${colors.green}🔧 ${msg}${colors.reset}`),
+  lock: (msg) => console.log(`${colors.magenta}🔒 ${msg}${colors.reset}`),
 };
 
 let issues = 0;
 let fixed = 0;
 
 // ========================================
-// Check 1: Polyfills
+// 完成形ファイルのハッシュ (変更検出用)
 // ========================================
-function checkPolyfills() {
-  log.info('Checking polyfills.ts...');
-  const polyfillsPath = path.join(ROOT, 'src/polyfills.ts');
-  
-  if (!fs.existsSync(polyfillsPath)) {
-    log.error('polyfills.ts not found');
-    issues++;
-    if (FIX_MODE) {
-      const content = `/**
- * React Native 用ポリフィル
- * 必ず最初にインポートすること
- */
+const LOCKED_FILES = {
+  'assets/icon.png': 'b16d15261c57c8df5567574b0573ef20',
+  'assets/adaptive-icon.png': 'b16d15261c57c8df5567574b0573ef20',
+};
 
-// crypto.getRandomValues polyfill - tweetnacl等が使用
-import 'react-native-get-random-values';
+// 必須パターン (これらが含まれていないとエラー)
+const REQUIRED_PATTERNS = {
+  'src/polyfills.ts': [
+    "react-native-get-random-values",
+    "buffer",
+  ],
+  'src/utils/phantom.ts': [
+    "bs58.encode",
+    "dappKeyBase58",
+    "handlePhantomConnectRedirect",
+  ],
+  'app/_layout.tsx': [
+    "SafeAreaProvider",
+    "polyfills",
+  ],
+  'src/screens/HomeScreen.tsx': [
+    "SafeAreaView",
+  ],
+  'src/screens/ReceiveScreen.tsx': [
+    "SafeAreaView",
+  ],
+  'src/screens/WalletScreen.tsx': [
+    "SafeAreaView",
+  ],
+};
 
-// Buffer polyfill - @solana/web3.js が使用
-import { Buffer } from 'buffer';
+// 禁止パターン (これらが含まれているとエラー)
+const FORBIDDEN_PATTERNS = {
+  'src/polyfills.ts': [
+    '/ingest/',
+  ],
+  'src/utils/phantom.ts': [
+    '/ingest/',
+  ],
+  'app/_layout.tsx': [
+    '/ingest/',
+  ],
+  'src/screens/HomeScreen.tsx': [
+    '/ingest/',
+  ],
+  'src/screens/ReceiveScreen.tsx': [
+    '/ingest/',
+  ],
+  'src/screens/WalletScreen.tsx': [
+    '/ingest/',
+  ],
+};
 
-if (typeof global !== 'undefined') {
-  (global as typeof globalThis & { Buffer?: typeof Buffer }).Buffer = Buffer;
-}
-`;
-      fs.writeFileSync(polyfillsPath, content);
-      log.fix('Created polyfills.ts');
-      fixed++;
-    }
-    return;
-  }
-  
-  const content = fs.readFileSync(polyfillsPath, 'utf8');
-  
-  // Check for react-native-get-random-values
-  if (!content.includes("react-native-get-random-values")) {
-    log.error('polyfills.ts missing react-native-get-random-values import');
-    issues++;
-    if (FIX_MODE) {
-      const newContent = `// crypto.getRandomValues polyfill - tweetnacl等が使用
-import 'react-native-get-random-values';
-
-${content}`;
-      fs.writeFileSync(polyfillsPath, newContent);
-      log.fix('Added react-native-get-random-values to polyfills.ts');
-      fixed++;
-    }
-  } else {
-    log.success('polyfills.ts has react-native-get-random-values');
-  }
-  
-  // Check for Buffer
-  if (!content.includes("buffer")) {
-    log.error('polyfills.ts missing Buffer import');
-    issues++;
-  } else {
-    log.success('polyfills.ts has Buffer polyfill');
-  }
-  
-  // Check for debug logs
-  if (content.includes('fetch(') && content.includes('/ingest/')) {
-    log.warn('polyfills.ts contains debug fetch calls');
-    issues++;
-    if (FIX_MODE) {
-      // Remove agent log blocks
-      let cleaned = content.replace(/\/\/ #region agent log[\s\S]*?\/\/ #endregion\n?/g, '');
-      fs.writeFileSync(polyfillsPath, cleaned);
-      log.fix('Removed debug fetch calls from polyfills.ts');
-      fixed++;
-    }
-  }
+// ========================================
+// Utility Functions
+// ========================================
+function getFileMD5(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  const content = fs.readFileSync(filePath);
+  return crypto.createHash('md5').update(content).digest('hex');
 }
 
 // ========================================
-// Check 2: SafeAreaView in Screens
+// Check 0: Locked Files (完成形保護)
 // ========================================
-function checkSafeAreaView() {
-  log.info('Checking SafeAreaView usage in screens...');
-  const screensDir = path.join(ROOT, 'src/screens');
+function checkLockedFiles() {
+  log.info('Checking locked files (完成形保護)...');
   
-  if (!fs.existsSync(screensDir)) {
-    log.warn('src/screens directory not found');
-    return;
-  }
-  
-  const files = fs.readdirSync(screensDir).filter(f => f.endsWith('.tsx'));
-  
-  for (const file of files) {
-    const filePath = path.join(screensDir, file);
-    const content = fs.readFileSync(filePath, 'utf8');
+  for (const [relativePath, expectedHash] of Object.entries(LOCKED_FILES)) {
+    const fullPath = path.join(ROOT, relativePath);
     
-    // Check if it's a screen component (has React.FC or export default)
-    if (!content.includes('React.FC') && !content.includes('export default')) {
+    if (!fs.existsSync(fullPath)) {
+      log.error(`${relativePath} not found (LOCKED FILE MISSING!)`);
+      issues++;
       continue;
     }
     
-    // Check for SafeAreaView usage
-    const hasSafeAreaView = content.includes('SafeAreaView') || content.includes('useSafeAreaInsets');
+    const actualHash = getFileMD5(fullPath);
     
-    if (!hasSafeAreaView) {
-      log.error(`${file} does not use SafeAreaView or useSafeAreaInsets`);
-      issues++;
-      // Auto-fix is complex for this, so just warn
+    if (actualHash === expectedHash) {
+      log.lock(`${relativePath} is intact`);
     } else {
-      log.success(`${file} uses SafeAreaView`);
+      log.error(`${relativePath} has been MODIFIED! (expected: ${expectedHash}, got: ${actualHash})`);
+      log.warn(`  → This file should not be changed. Restore from backup or git.`);
+      issues++;
+    }
+  }
+}
+
+// ========================================
+// Check 1: Required Patterns
+// ========================================
+function checkRequiredPatterns() {
+  log.info('Checking required code patterns...');
+  
+  for (const [relativePath, patterns] of Object.entries(REQUIRED_PATTERNS)) {
+    const fullPath = path.join(ROOT, relativePath);
+    
+    if (!fs.existsSync(fullPath)) {
+      log.error(`${relativePath} not found`);
+      issues++;
+      continue;
     }
     
-    // Check for debug logs
-    if (content.includes('fetch(') && content.includes('/ingest/')) {
-      log.warn(`${file} contains debug fetch calls`);
-      issues++;
-      if (FIX_MODE) {
-        let cleaned = content.replace(/\/\/ #region agent log[\s\S]*?\/\/ #endregion\n?/g, '');
-        fs.writeFileSync(filePath, cleaned);
-        log.fix(`Removed debug fetch calls from ${file}`);
-        fixed++;
+    const content = fs.readFileSync(fullPath, 'utf8');
+    let fileOk = true;
+    
+    for (const pattern of patterns) {
+      if (!content.includes(pattern)) {
+        log.error(`${relativePath} missing required pattern: "${pattern}"`);
+        issues++;
+        fileOk = false;
       }
+    }
+    
+    if (fileOk) {
+      log.success(`${relativePath} has all required patterns`);
+    }
+  }
+}
+
+// ========================================
+// Check 2: Forbidden Patterns
+// ========================================
+function checkForbiddenPatterns() {
+  log.info('Checking for forbidden patterns (debug code)...');
+  
+  for (const [relativePath, patterns] of Object.entries(FORBIDDEN_PATTERNS)) {
+    const fullPath = path.join(ROOT, relativePath);
+    
+    if (!fs.existsSync(fullPath)) {
+      continue; // Skip if file doesn't exist (handled elsewhere)
+    }
+    
+    const content = fs.readFileSync(fullPath, 'utf8');
+    let fileOk = true;
+    
+    for (const pattern of patterns) {
+      if (content.includes(pattern)) {
+        log.error(`${relativePath} contains forbidden pattern: "${pattern}"`);
+        issues++;
+        fileOk = false;
+        
+        if (FIX_MODE) {
+          // Remove agent log blocks
+          let cleaned = content.replace(/\/\/ #region agent log[\s\S]*?\/\/ #endregion\n?/g, '');
+          fs.writeFileSync(fullPath, cleaned);
+          log.fix(`Removed debug code from ${relativePath}`);
+          fixed++;
+        }
+      }
+    }
+    
+    if (fileOk) {
+      log.success(`${relativePath} has no forbidden patterns`);
     }
   }
 }
@@ -223,7 +266,6 @@ function checkAndroidConfig() {
     log.error('android/local.properties not found');
     issues++;
     if (FIX_MODE) {
-      // Try to find Android SDK
       const possibleSdkPaths = [
         process.env.ANDROID_HOME,
         process.env.ANDROID_SDK_ROOT,
@@ -260,96 +302,7 @@ function checkAndroidConfig() {
 }
 
 // ========================================
-// Check 5: Phantom Base58 encoding
-// ========================================
-function checkPhantomUtils() {
-  log.info('Checking Phantom utils...');
-  const phantomPath = path.join(ROOT, 'src/utils/phantom.ts');
-  
-  if (!fs.existsSync(phantomPath)) {
-    log.warn('src/utils/phantom.ts not found');
-    return;
-  }
-  
-  const content = fs.readFileSync(phantomPath, 'utf8');
-  
-  // Check buildPhantomConnectUrl uses Base58
-  if (content.includes('buildPhantomConnectUrl')) {
-    if (content.includes('bs58.encode') && content.includes('dappKeyBase58')) {
-      log.success('buildPhantomConnectUrl converts to Base58');
-    } else {
-      log.error('buildPhantomConnectUrl may not be converting to Base58');
-      issues++;
-    }
-  }
-  
-  // Check for handlePhantomConnectRedirect
-  if (content.includes('handlePhantomConnectRedirect')) {
-    log.success('handlePhantomConnectRedirect is defined');
-  } else {
-    log.error('handlePhantomConnectRedirect is missing');
-    issues++;
-  }
-  
-  // Check for debug logs
-  if (content.includes('fetch(') && content.includes('/ingest/')) {
-    log.warn('phantom.ts contains debug fetch calls');
-    issues++;
-    if (FIX_MODE) {
-      let cleaned = content.replace(/\/\/ #region agent log[\s\S]*?\/\/ #endregion\n?/g, '');
-      fs.writeFileSync(phantomPath, cleaned);
-      log.fix('Removed debug fetch calls from phantom.ts');
-      fixed++;
-    }
-  }
-}
-
-// ========================================
-// Check 6: App Layout SafeAreaProvider
-// ========================================
-function checkAppLayout() {
-  log.info('Checking app/_layout.tsx...');
-  const layoutPath = path.join(ROOT, 'app/_layout.tsx');
-  
-  if (!fs.existsSync(layoutPath)) {
-    log.warn('app/_layout.tsx not found');
-    return;
-  }
-  
-  const content = fs.readFileSync(layoutPath, 'utf8');
-  
-  // Check SafeAreaProvider
-  if (content.includes('SafeAreaProvider')) {
-    log.success('_layout.tsx has SafeAreaProvider');
-  } else {
-    log.error('_layout.tsx missing SafeAreaProvider');
-    issues++;
-  }
-  
-  // Check polyfills import is first
-  const lines = content.split('\n');
-  const firstImportLine = lines.findIndex(l => l.startsWith('import'));
-  if (firstImportLine >= 0 && lines[firstImportLine].includes('polyfills')) {
-    log.success('polyfills is imported first');
-  } else {
-    log.warn('polyfills should be imported first in _layout.tsx');
-  }
-  
-  // Check for debug logs
-  if (content.includes('fetch(') && content.includes('/ingest/')) {
-    log.warn('_layout.tsx contains debug fetch calls');
-    issues++;
-    if (FIX_MODE) {
-      let cleaned = content.replace(/\/\/ #region agent log[\s\S]*?\/\/ #endregion\n?/g, '');
-      fs.writeFileSync(layoutPath, cleaned);
-      log.fix('Removed debug fetch calls from _layout.tsx');
-      fixed++;
-    }
-  }
-}
-
-// ========================================
-// Check 7: node_modules existence
+// Check 5: node_modules existence
 // ========================================
 function checkNodeModules() {
   log.info('Checking node_modules...');
@@ -373,7 +326,7 @@ function checkNodeModules() {
 }
 
 // ========================================
-// Check 8: Assets (icon)
+// Check 6: Assets
 // ========================================
 function checkAssets() {
   log.info('Checking assets...');
@@ -396,7 +349,8 @@ function checkAssets() {
     if (fs.existsSync(assetPath)) {
       log.success(`${asset} exists`);
     } else {
-      log.warn(`${asset} not found`);
+      log.error(`${asset} not found`);
+      issues++;
     }
   }
 }
@@ -408,20 +362,25 @@ console.log('\n🏥 We-ne Mobile Doctor\n');
 console.log(`Mode: ${FIX_MODE ? 'FIX' : 'CHECK'}\n`);
 console.log('─'.repeat(50));
 
+// Critical checks first
+checkLockedFiles();
+console.log('');
+
 checkNodeModules();
 console.log('');
+
 checkDependencies();
 console.log('');
-checkPolyfills();
+
+checkRequiredPatterns();
 console.log('');
-checkAppLayout();
+
+checkForbiddenPatterns();
 console.log('');
-checkSafeAreaView();
-console.log('');
-checkPhantomUtils();
-console.log('');
+
 checkAndroidConfig();
 console.log('');
+
 checkAssets();
 
 console.log('\n' + '─'.repeat(50));
@@ -433,6 +392,10 @@ if (FIX_MODE) {
 if (issues > 0 && !FIX_MODE) {
   console.log(`\n💡 Run with --fix to auto-fix some issues:`);
   console.log(`   node scripts/doctor.js --fix\n`);
+}
+
+if (issues === 0) {
+  console.log(`\n✨ All checks passed! App is in stable state.\n`);
 }
 
 process.exit(issues > 0 ? 1 : 0);
