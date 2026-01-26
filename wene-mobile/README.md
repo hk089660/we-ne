@@ -29,7 +29,7 @@ npx expo prebuild --clean
 
 ## Doctor Script
 
-The `doctor` script automatically detects and fixes common development issues:
+The `doctor` script automatically detects and fixes common development issues, and protects the app's stable state:
 
 ```bash
 # Check for issues
@@ -39,21 +39,50 @@ npm run doctor
 npm run doctor:fix
 ```
 
-**What it checks:**
+### 🔒 Locked Files Protection (完成形保護)
+
+Critical files are protected with MD5 hash verification. If these files are accidentally modified, doctor will immediately detect it:
+
+```
+🔒 assets/icon.png is intact
+🔒 assets/adaptive-icon.png is intact
+```
+
+If modified:
+```
+✗ assets/icon.png has been MODIFIED! (expected: b16d..., got: xxxx...)
+⚠ → This file should not be changed. Restore from backup or git.
+```
+
+### ✅ Required Patterns Check
+
+Ensures critical code patterns exist in key files:
+
+| File | Required Patterns |
+|------|-------------------|
+| `src/polyfills.ts` | `react-native-get-random-values`, `buffer` |
+| `src/utils/phantom.ts` | `bs58.encode`, `dappKeyBase58`, `handlePhantomConnectRedirect` |
+| `app/_layout.tsx` | `SafeAreaProvider`, `polyfills` |
+| All screens | `SafeAreaView` |
+
+### 🚫 Forbidden Patterns Check
+
+Detects and removes debug code (e.g., `/ingest/` fetch calls) from source files.
+
+### Other Checks
+
 - ✅ `node_modules` existence
 - ✅ Required dependencies (`react-native-get-random-values`, `buffer`, `bs58`, etc.)
-- ✅ `polyfills.ts` configuration (crypto polyfills)
-- ✅ `SafeAreaProvider` in `_layout.tsx`
-- ✅ `SafeAreaView` usage in all screens
-- ✅ Phantom Base58 encoding
 - ✅ Android `local.properties` configuration
-- ✅ App icon assets
+- ✅ App icon assets existence
 
-**Auto-fixable issues:**
-- Missing dependencies → `npm install`
-- Missing polyfills → Creates/updates `polyfills.ts`
-- Missing `local.properties` → Auto-detects Android SDK path
-- Debug fetch calls → Removes agent debug logs
+### Auto-fixable Issues
+
+| Issue | Fix |
+|-------|-----|
+| Missing dependencies | `npm install` |
+| Missing `local.properties` | Auto-detects Android SDK path |
+| Debug fetch calls | Removes agent debug logs |
 
 ## Setup Script
 
