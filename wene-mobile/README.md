@@ -4,15 +4,70 @@
 
 Recipient-facing UI built with React Native (Expo + TypeScript)
 
-## Setup
+## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+# One-command setup (recommended for new environments)
+npm run setup
 
-# Start the app
-npm start
+# Or manual setup:
+npm install --legacy-peer-deps
+npm run doctor:fix
+npx expo prebuild --clean
 ```
+
+## Available Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run setup` | Full environment setup (install + doctor + prebuild) |
+| `npm run doctor` | Check for common issues |
+| `npm run doctor:fix` | Auto-fix common issues |
+| `npm run build:apk` | Build Android APK |
+| `npm run deploy:adb` | Build and install via ADB |
+| `npm start` | Start Expo dev server |
+
+## Doctor Script
+
+The `doctor` script automatically detects and fixes common development issues:
+
+```bash
+# Check for issues
+npm run doctor
+
+# Auto-fix issues
+npm run doctor:fix
+```
+
+**What it checks:**
+- ✅ `node_modules` existence
+- ✅ Required dependencies (`react-native-get-random-values`, `buffer`, `bs58`, etc.)
+- ✅ `polyfills.ts` configuration (crypto polyfills)
+- ✅ `SafeAreaProvider` in `_layout.tsx`
+- ✅ `SafeAreaView` usage in all screens
+- ✅ Phantom Base58 encoding
+- ✅ Android `local.properties` configuration
+- ✅ App icon assets
+
+**Auto-fixable issues:**
+- Missing dependencies → `npm install`
+- Missing polyfills → Creates/updates `polyfills.ts`
+- Missing `local.properties` → Auto-detects Android SDK path
+- Debug fetch calls → Removes agent debug logs
+
+## Setup Script
+
+For new worktrees or clean builds:
+
+```bash
+npm run setup
+```
+
+**What it does:**
+1. `npm install --legacy-peer-deps`
+2. `npm run doctor --fix`
+3. `rm -rf android ios && npx expo prebuild --clean`
+4. Creates `android/local.properties` with detected SDK path
 
 ## Directory Structure
 
@@ -31,6 +86,8 @@ wene-mobile/
 │   ├── splash.png           # Splash screen image
 │   └── icon-source.png      # Source image for icon generation
 ├── scripts/
+│   ├── doctor.js            # Issue detection and auto-fix
+│   ├── setup.sh             # Full environment setup
 │   ├── generate-icons.js    # Icon generation script
 │   └── deploy-via-adb.sh    # ADB deployment script
 ├── app.config.ts            # Expo configuration (deeplinks included)

@@ -1,7 +1,8 @@
 import * as nacl from 'tweetnacl';
-import { Linking } from 'react-native';
+import { Linking, Platform, ToastAndroid } from 'react-native';
 import { Transaction } from '@solana/web3.js';
 import bs58 from 'bs58';
+import * as LinkingExpo from 'expo-linking';
 import { setPendingSignTx, resolvePendingSignTx, rejectPendingSignTx } from './phantomSignTxPending';
 import { openPhantomConnect } from '../wallet/openPhantom';
 
@@ -42,13 +43,25 @@ export const generateEncryptionKeyPair = (): nacl.BoxKeyPair => {
 
 /**
  * Phantom Connect URLを生成
+ * dapp_encryption_public_keyはBase58エンコードで送信
  */
 export const buildPhantomConnectUrl = (params: PhantomConnectParams): string => {
   const { dappEncryptionPublicKey, redirectLink, cluster = 'devnet', appUrl } = params;
   
+  // Base64 → Base58変換
+  let dappKeyBase58: string;
+  try {
+    const decoded = base64Decode(dappEncryptionPublicKey);
+    dappKeyBase58 = bs58.encode(decoded);
+    console.log('[buildPhantomConnectUrl] dapp_encryption_public_key converted to base58, length:', dappKeyBase58.length);
+  } catch (e) {
+    console.warn('[buildPhantomConnectUrl] Failed to convert to base58, using as-is');
+    dappKeyBase58 = dappEncryptionPublicKey;
+  }
+  
   const url = new URL('https://phantom.app/ul/v1/connect');
   url.searchParams.set('app_url', appUrl);
-  url.searchParams.set('dapp_encryption_public_key', dappEncryptionPublicKey);
+  url.searchParams.set('dapp_encryption_public_key', dappKeyBase58);
   url.searchParams.set('redirect_link', redirectLink);
   url.searchParams.set('cluster', cluster);
   
@@ -57,15 +70,15 @@ export const buildPhantomConnectUrl = (params: PhantomConnectParams): string => 
 
 /**
  * PhantomからのリダイレクトURLを解析
- * 形式: wene://phantom/connect?data=...&nonce=...
  */
 export const parsePhantomRedirect = (url: string): { data: string; nonce: string } | null => {
   try {
-    const parsed = new URL(url);
-    const data = parsed.searchParams.get('data');
-    const nonce = parsed.searchParams.get('nonce');
+    const parsed = LinkingExpo.parse(url);
+    const qp = parsed.queryParams ?? {};
+    const data = qp.data;
+    const nonce = qp.nonce;
     
-    if (!data || !nonce) {
+    if (!data || typeof data !== 'string' || !nonce || typeof nonce !== 'string') {
       return null;
     }
     
@@ -85,10 +98,10 @@ export const decryptPhantomResponse = (
   phantomPublicKey: string
 ): PhantomConnectResult | null => {
   try {
-    // Base64デコード
-    const encrypted = base64Decode(encryptedData);
-    const nonceBytes = base64Decode(nonce);
-    const phantomPubkeyBytes = base64Decode(phantomPublicKey);
+    // Base58デコード
+    const encrypted = bs58.decode(encryptedData);
+    const nonceBytes = bs58.decode(nonce);
+    const phantomPubkeyBytes = bs58.decode(phantomPublicKey);
     
     // 復号
     const decrypted = nacl.box.open(encrypted, nonceBytes, phantomPubkeyBytes, dappSecretKey);
@@ -127,8 +140,72 @@ export const initiatePhantomConnect = async (
     appUrl,
   });
   
-  // openPhantomConnectを使用（canOpenURL依存を排除）
   await openPhantomConnect(url);
+};
+
+/**
+ * Phantom Connectリダイレクト処理
+ */
+export const handlePhantomConnectRedirect = (
+  url: string,
+  dappSecretKey: Uint8Array
+): { ok: true; result: PhantomConnectResult; phantomPublicKey: string } | { ok: false; error: string; stage: string } => {
+  try {
+    console.log('[handlePhantomConnectRedirect] stage=start, url:', url);
+    
+    // URLパース
+    const urlParsed = LinkingExpo.parse(url);
+    const qp = urlParsed.queryParams ?? {};
+    
+    // エラーチェック
+    if (qp.errorCode || qp.errorMessage) {
+      return { ok: false, error: `${qp.errorCode}: ${qp.errorMessage}`, stage: 'error_response' };
+    }
+    
+    const data = qp.data as string;
+    const nonce = qp.nonce as string;
+    const phantomPublicKey = qp.phantom_encryption_public_key as string;
+    
+    if (!data || !nonce || !phantomPublicKey) {
+      return { ok: false, error: 'Missing required params', stage: 'check_params' };
+    }
+    
+    console.log('[handlePhantomConnectRedirect] stage=check_keys, keys_ok, dappSecretKey length:', dappSecretKey.length);
+    
+    // 復号
+    const encrypted = bs58.decode(data);
+    const nonceBytes = bs58.decode(nonce);
+    const phantomPubkeyBytes = bs58.decode(phantomPublicKey);
+    
+    console.log('[handlePhantomConnectRedirect] stage=decrypt, decode_ok');
+    
+    const decrypted = nacl.box.open(encrypted, nonceBytes, phantomPubkeyBytes, dappSecretKey);
+    
+    if (!decrypted) {
+      return { ok: false, error: 'Decryption failed', stage: 'decrypt' };
+    }
+    
+    console.log('[handlePhantomConnectRedirect] stage=decrypt, decrypt_ok, decrypted length:', decrypted.length);
+    
+    // JSONパース
+    const jsonString = new TextDecoder().decode(decrypted);
+    const result = JSON.parse(jsonString);
+    
+    console.log('[handlePhantomConnectRedirect] stage=json_parse, success, keys:', Object.keys(result));
+    
+    return {
+      ok: true,
+      result: {
+        publicKey: result.public_key,
+        session: result.session,
+      },
+      phantomPublicKey,
+    };
+  } catch (e) {
+    const errorMsg = (e as Error)?.message ?? String(e);
+    console.error('[handlePhantomConnectRedirect] error:', errorMsg);
+    return { ok: false, error: errorMsg, stage: 'exception' };
+  }
 };
 
 // --- signTransaction ---
@@ -146,7 +223,6 @@ export interface PhantomSignTransactionParams {
 
 /**
  * Phantom signTransaction URL を生成
- * payload: { transaction: base64, session } を暗号化して base58
  */
 export const buildPhantomSignTransactionUrl = (params: PhantomSignTransactionParams): string => {
   const {
@@ -160,8 +236,17 @@ export const buildPhantomSignTransactionUrl = (params: PhantomSignTransactionPar
     appUrl = 'https://wene.app',
   } = params;
 
+  // Base64 → Base58変換
+  let dappKeyBase58: string;
+  try {
+    const decoded = base64Decode(dappEncryptionPublicKey);
+    dappKeyBase58 = bs58.encode(decoded);
+  } catch {
+    dappKeyBase58 = dappEncryptionPublicKey;
+  }
+
   const nonce = nacl.randomBytes(24);
-  const phantomPk = base64Decode(phantomEncryptionPublicKey);
+  const phantomPk = bs58.decode(phantomEncryptionPublicKey);
 
   const serialized = tx.serialize({
     requireAllSignatures: false,
@@ -183,7 +268,7 @@ export const buildPhantomSignTransactionUrl = (params: PhantomSignTransactionPar
   }
 
   const url = new URL('https://phantom.app/ul/v1/signTransaction');
-  url.searchParams.set('dapp_encryption_public_key', dappEncryptionPublicKey);
+  url.searchParams.set('dapp_encryption_public_key', dappKeyBase58);
   url.searchParams.set('nonce', bs58.encode(nonce));
   url.searchParams.set('redirect_link', redirectLink);
   url.searchParams.set('payload', bs58.encode(encrypted));
@@ -195,7 +280,6 @@ export const buildPhantomSignTransactionUrl = (params: PhantomSignTransactionPar
 
 /**
  * Phantom signTransaction リダイレクトの復号
- * 応答: { signed_transaction: base64 }
  */
 export const decryptPhantomSignTransactionResponse = (
   encryptedData: string,
@@ -204,9 +288,9 @@ export const decryptPhantomSignTransactionResponse = (
   phantomPublicKey: string
 ): Transaction | null => {
   try {
-    const encrypted = base64Decode(encryptedData);
-    const nonceBytes = base64Decode(nonce);
-    const phantomPk = base64Decode(phantomPublicKey);
+    const encrypted = bs58.decode(encryptedData);
+    const nonceBytes = bs58.decode(nonce);
+    const phantomPk = bs58.decode(phantomPublicKey);
 
     const decrypted = nacl.box.open(encrypted, nonceBytes, phantomPk, dappSecretKey);
     if (!decrypted) {
@@ -214,7 +298,7 @@ export const decryptPhantomSignTransactionResponse = (
     }
 
     const result = JSON.parse(new TextDecoder().decode(decrypted));
-    const signedB64 = result.signed_transaction ?? result.signedTransaction;
+    const signedB64 = result.transaction ?? result.signed_transaction ?? result.signedTransaction;
     if (!signedB64) {
       return null;
     }
@@ -229,7 +313,6 @@ export const decryptPhantomSignTransactionResponse = (
 
 /**
  * Phantom signTransaction を開始
- * リダイレクト待ちの Promise を返す。handleRedirect で resolve/reject される。
  */
 export const signTransaction = async (
   params: PhantomSignTransactionParams
@@ -239,11 +322,8 @@ export const signTransaction = async (
   return new Promise<Transaction>((resolve, reject) => {
     setPendingSignTx(resolve, reject);
 
-    // openPhantomConnectを使用（canOpenURL依存を排除）
     openPhantomConnect(url)
-      .then(() => {
-        // 成功時は何もしない（リダイレクト待ち）
-      })
+      .then(() => {})
       .catch((err) => {
         rejectPendingSignTx(err instanceof Error ? err : new Error(String(err)));
       });
@@ -252,27 +332,29 @@ export const signTransaction = async (
 
 /**
  * signTransaction リダイレクト処理
- * URL を解析し、復号して signed Transaction を取得し、待機中 Promise を resolve/reject する。
- * action=signTransaction のときだけ呼ぶ。
  */
 export const handleRedirect = (
   url: string,
   dappSecretKey: Uint8Array
 ): { ok: true; tx: Transaction } | { ok: false; error: string } => {
-  const parsed = parsePhantomRedirect(url);
-  if (!parsed) {
+  const urlParsed = LinkingExpo.parse(url);
+  const qp = urlParsed.queryParams ?? {};
+  
+  const data = qp.data as string;
+  const nonce = qp.nonce as string;
+  const phantomPublicKey = qp.phantom_encryption_public_key as string;
+  
+  if (!data || !nonce) {
     return { ok: false, error: 'Invalid redirect URL' };
   }
 
-  const urlObj = new URL(url);
-  const phantomPublicKey = urlObj.searchParams.get('phantom_encryption_public_key');
   if (!phantomPublicKey) {
     return { ok: false, error: 'Phantom public key not found' };
   }
 
   const tx = decryptPhantomSignTransactionResponse(
-    parsed.data,
-    parsed.nonce,
+    data,
+    nonce,
     dappSecretKey,
     phantomPublicKey
   );

@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
+    "doctor": "node scripts/doctor.js",
+    "doctor:fix": "node scripts/doctor.js --fix",
+    "setup": "bash scripts/setup.sh",
     "generate-icons": "node scripts/generate-icons.js",
     "deploy:adb": "bash scripts/deploy-via-adb.sh",
     "start": "expo start",
@@ -35,6 +38,7 @@
     "expo-web-browser": "^15.0.10",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-get-random-values": "^2.0.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "tweetnacl": "^1.0.3",

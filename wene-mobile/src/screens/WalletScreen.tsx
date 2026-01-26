@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRecipientStore } from '../store/recipientStore';
 import { getGrantByCampaignId } from '../api/getGrant';
 import type { Grant } from '../types/grant';
@@ -51,18 +52,18 @@ export const WalletScreen: React.FC = () => {
 
   if (loading && campaignId) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.center}>
           <AppText variant="body" style={styles.muted}>
             読み込み中…
           </AppText>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -151,7 +152,7 @@ export const WalletScreen: React.FC = () => {
           )}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 };
 

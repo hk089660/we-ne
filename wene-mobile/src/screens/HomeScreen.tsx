@@ -1,20 +1,14 @@
-import React, { useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import React from 'react';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppText, Button } from '../ui/components';
 import { theme } from '../ui/theme';
 
 export const HomeScreen: React.FC = () => {
   const router = useRouter();
-  
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7242/ingest/2e86959c-0542-444e-a106-629fb6908b3d',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'HomeScreen.tsx:11',message:'HomeScreen mounted',data:{platform:Platform.OS,hasBuffer:typeof (global as any)?.Buffer!=='undefined'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,D'})}).catch(()=>{});
-  }, []);
-  // #endregion
 
   const handleStartReceive = () => {
-    // デモ用: 実際にはQRコードスキャンやリンクから遷移
     router.push('/r/demo-campaign?code=demo-invite');
   };
 
@@ -23,7 +17,7 @@ export const HomeScreen: React.FC = () => {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.content}>
         <AppText variant="h1" style={styles.title}>
           We-ne
@@ -46,7 +40,7 @@ export const HomeScreen: React.FC = () => {
           </AppText>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 };
 

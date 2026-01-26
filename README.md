@@ -101,21 +101,49 @@ we-ne provides:
 ### Prerequisites
 - Node.js v18+
 - For smart contract: Rust, Solana CLI, Anchor
-- For mobile: Android Studio or Xcode
+- For mobile: Android SDK, Java 17
 
 ### Run Mobile App (Development)
 
 ```bash
-# Clone and install
+# Clone repository
 git clone https://github.com/hk089660/-instant-grant-core.git
 cd we-ne/wene-mobile
-npm install
 
-# Start Expo
+# One-command setup (recommended)
+npm run setup
+
+# Or manual setup:
+npm install --legacy-peer-deps
+npm run doctor:fix          # Check and fix common issues
+npx expo prebuild --clean   # Generate native projects
+
+# Start Expo dev server
 npm start
-
-# Scan QR with Expo Go app
 ```
+
+### Build Android APK
+
+```bash
+cd wene-mobile
+npm run build:apk
+
+# Output: android/app/build/outputs/apk/release/app-release.apk
+```
+
+### Troubleshooting
+
+Use the built-in doctor script to diagnose and fix issues:
+
+```bash
+# Check for issues
+npm run doctor
+
+# Auto-fix issues
+npm run doctor:fix
+```
+
+The doctor checks: dependencies, polyfills, SafeArea configuration, Phantom integration, Android SDK setup, and more.
 
 ### Build Smart Contract
 

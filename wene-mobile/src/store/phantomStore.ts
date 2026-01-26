@@ -8,12 +8,17 @@ const base64Encode = (bytes: Uint8Array): string => {
   return btoa(binary);
 };
 
+interface PhantomConnectResult {
+  publicKey: string;
+  session: string;
+  phantomPublicKey: string;
+}
+
 interface PhantomStore {
   // 暗号化キーペア
   encryptionKeyPair: nacl.BoxKeyPair | null;
   dappEncryptionPublicKey: string | null;
   dappSecretKey: Uint8Array | null;
-  /** Connect リダイレクトで得た Phantom 側の暗号化公開鍵（signTransaction で使用） */
   phantomEncryptionPublicKey: string | null;
 
   // アクション
@@ -22,9 +27,12 @@ interface PhantomStore {
   saveKeyPair: (keyPair: nacl.BoxKeyPair) => Promise<void>;
   loadKeyPair: () => Promise<nacl.BoxKeyPair | null>;
   setPhantomEncryptionPublicKey: (pk: string | null) => void;
+  savePhantomConnectResult: (publicKey: string, session: string, phantomPublicKey: string) => Promise<void>;
+  loadPhantomConnectResult: () => Promise<PhantomConnectResult | null>;
 }
 
 const STORAGE_KEY = 'phantom_encryption_keypair';
+const STORAGE_KEY_CONNECT_RESULT = 'phantom_connect_result';
 
 export const usePhantomStore = create<PhantomStore>((set, get) => ({
   encryptionKeyPair: null,
@@ -86,4 +94,32 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
   },
 
   setPhantomEncryptionPublicKey: (pk) => set({ phantomEncryptionPublicKey: pk }),
+
+  savePhantomConnectResult: async (publicKey, session, phantomPublicKey) => {
+    const data: PhantomConnectResult = {
+      publicKey,
+      session,
+      phantomPublicKey,
+    };
+    await AsyncStorage.setItem(STORAGE_KEY_CONNECT_RESULT, JSON.stringify(data));
+    console.log('[phantomStore] savePhantomConnectResult success:', publicKey.substring(0, 8) + '...');
+  },
+
+  loadPhantomConnectResult: async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY_CONNECT_RESULT);
+      if (!stored) {
+        return null;
+      }
+      const data = JSON.parse(stored);
+      return {
+        publicKey: data.publicKey,
+        session: data.session,
+        phantomPublicKey: data.phantomPublicKey,
+      } as PhantomConnectResult;
+    } catch (e) {
+      console.error('[phantomStore] loadPhantomConnectResult error:', e);
+      return null;
+    }
+  },
 }));
