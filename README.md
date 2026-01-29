@@ -9,6 +9,14 @@
 
 ---
 
+## Overview
+
+**日本語**: We-neは、Solana上で「即時に配布・即時に利用できる」支援クレジット基盤です。FairScaleのレピュテーションを用いて、不正や濫用を抑えつつ、モバイルから誰でもアクセスできます。現在はプロトタイプ段階で、Phantom連携と基本フローが動作しています。
+
+**English**: We-ne is an instant distribution and instant usage support credit infrastructure built on Solana. Using FairScale's reputation system, it prevents fraud and abuse while enabling mobile access for everyone. Currently in prototype stage, with Phantom integration and basic flow operational.
+
+---
+
 ## 🎯 What is we-ne?
 
 we-ne is a **non-custodial benefit distribution system** built on Solana, designed to deliver support payments instantly and transparently.
@@ -86,7 +94,30 @@ we-ne provides:
 
 ## 📱 Demo
 
-> 🎬 **Video demo**: [https://x.com/Shiki93278/status/2015659939356889450]
+**Demo Video**:
+
+<div align="center">
+
+**[📹 デモ動画を見る / Watch Demo Video (11MB)](https://github.com/hk089660/-instant-grant-core/raw/main/docs/demo.mp4)**
+
+*Click the link above to watch the demo video*
+
+</div>
+
+⚠️ **Note**: The demo link will directly download a short MP4 file (≈11 MB). This is intentional to allow offline review without external video platforms.
+
+⚠️ **注意**: デモリンクは直接MP4ファイル（約11MB）をダウンロードします。これは外部動画プラットフォームを使わずにオフラインで確認できるようにするための意図的な動作です。
+
+**日本語**: 上記のリンクをクリックすると、モバイルアプリからPhantomウォレットを接続し、給付プログラムに接続して受給する一連の流れを確認できるデモ動画が表示されます。
+
+**English**: Click the link above to watch a demo video showing the complete flow of connecting a Phantom wallet from the mobile app, accessing a grant program, and claiming benefits.
+
+**What the demo shows**:
+1. Opening the mobile app and connecting Phantom wallet
+2. Scanning QR code or opening deep link (`wene://r/<campaignId>`)
+3. Viewing grant details (amount, period, eligibility)
+4. Tapping "Claim" → Phantom wallet signing the transaction
+5. SPL tokens being transferred to recipient's wallet within seconds
 
 ### Screenshots
 
