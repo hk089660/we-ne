@@ -1,0 +1,85 @@
+# we-ne: Build and test (contract + mobile)
+# Third-party / contributor build verification
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  SOLANA_VERSION: "1.18.0"
+  NODE_VERSION: "20"
+
+jobs:
+  contract:
+    name: Smart contract (Anchor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: grant_program -> target
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana --version
+
+      - name: Install Anchor
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install latest
+          avm use latest
+          anchor --version
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "yarn"
+          cache-dependency-path: grant_program/yarn.lock
+
+      - name: Install grant_program deps
+        working-directory: grant_program
+        run: yarn install --frozen-lockfile
+
+      - name: Build
+        working-directory: grant_program
+        run: anchor build
+
+      - name: Test
+        working-directory: grant_program
+        run: anchor test
+        timeout-minutes: 5
+
+  mobile:
+    name: Mobile app (Expo / TypeScript)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: wene-mobile/package-lock.json
+
+      - name: Install dependencies
+        working-directory: wene-mobile
+        run: npm ci
+
+      - name: Type check
+        working-directory: wene-mobile
+        run: npx tsc --noEmit
