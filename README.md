@@ -1,5 +1,31 @@
 # we-ne
 
+### Project Status
+This project is currently under **Superteam Japan Grants review**.
+It is in a **PoC / v0** phase, focused on the demo flow below.
+
+### What works today (Demo Flow)
+- Scan event QR code
+- View event details
+- Claim a digital participation ticket
+- Ticket is stored and viewable in the app
+
+### First Target Use Case: School Event Participation Ticket
+The first concrete use case of **We-ne** is a **digital participation ticket for school events and volunteer activities**.
+
+- Students scan a QR code at the event venue
+- A non-transferable digital participation ticket is issued instantly
+- No monetary value or exchangeability
+- Personal information (name, student number) is not exposed externally
+- Event organizers can verify participation counts via an admin interface
+
+This use case prioritizes **speed, usability, and privacy**, making it suitable for real educational environments.
+
+### Next Milestone (Short-term)
+- Simplified Scan → Confirm → Success flow
+- Basic admin dashboard (issued / completed counts)
+- Short demo video showcasing the full flow
+
 > **Instant, transparent benefit distribution on Solana — built for Japan's public support needs**
 
 [![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
