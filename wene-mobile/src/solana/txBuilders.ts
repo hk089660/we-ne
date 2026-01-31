@@ -10,6 +10,9 @@ import { BN } from '@coral-xyz/anchor';
 import { GRANT_PROGRAM_ID } from './config';
 import { getConnection, getProgram } from './anchorClient';
 import { getGrantPda, getVaultPda, getReceiptPda, calculatePeriodIndex } from './grantProgram';
+import { DEFAULT_CLUSTER } from './cluster';
+import { DEVNET_GRANT_CONFIG } from './devnetConfig';
+import { RPC_URL } from './singleton';
 
 /**
  * Claim Transaction 構築パラメータ
@@ -27,7 +30,10 @@ export interface BuildClaimTxResult {
   tx: Transaction;
   meta: {
     feePayer: PublicKey | null;
-    recentBlockhash: string | null;
+    /** buildClaimTx 時点の blockhash（sendSignedTx の confirmContext に必ず渡す） */
+    recentBlockhash: string;
+    /** buildClaimTx 時点の lastValidBlockHeight（sendSignedTx の confirmContext に必ず渡す） */
+    lastValidBlockHeight: number;
     instructionCount: number;
     grantPda: PublicKey;
     vaultPda: PublicKey;
@@ -51,55 +57,85 @@ export async function buildClaimTx(
 ): Promise<BuildClaimTxResult> {
   const { campaignId, recipientPubkey } = params;
   const connection = getConnection();
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log('[RPC] buildClaimTx() connection.rpcEndpoint=', connection.rpcEndpoint);
+    console.log('[CLUSTER_CHECK]', { rpcEndpoint: connection.rpcEndpoint, expected: 'devnet' });
+  }
   const program = getProgram();
 
-  // TODO: campaignId から Grant 情報（authority, mint, grantId）を取得
-  // 現時点では、ダミー値を使用（実際の実装では API から取得）
-  // 例: const grantInfo = await fetchGrantInfoByCampaignId(campaignId);
-  const dummyAuthority = new PublicKey('11111111111111111111111111111111');
-  const dummyMint = new PublicKey('So11111111111111111111111111111111111111112'); // SOL (devnet)
-  const dummyGrantId = BigInt(1);
+  // devnetConfig: DEV+devnet 時は本物の Grant を使用。未設定時は dummy にフォールバック
+  const useDevnetConfig =
+    DEFAULT_CLUSTER === 'devnet' && DEVNET_GRANT_CONFIG !== null;
 
-  // Grant アカウントを取得して period_index を計算
-  // TODO: 実際の実装では、Grant アカウントを fetch して start_ts, period_seconds を取得
-  const [grantPda] = getGrantPda(dummyAuthority, dummyMint, dummyGrantId);
-  
-  // スタブ: ダミー値で period_index を計算
-  const dummyStartTs = BigInt(Math.floor(Date.now() / 1000) - 86400); // 1日前
-  const dummyPeriodSeconds = BigInt(2592000); // 30日
-  const periodIndex = calculatePeriodIndex(dummyStartTs, dummyPeriodSeconds);
+  const authority = useDevnetConfig
+    ? DEVNET_GRANT_CONFIG.authority
+    : new PublicKey('11111111111111111111111111111111');
+  const mint = useDevnetConfig
+    ? DEVNET_GRANT_CONFIG.mint
+    : new PublicKey('So11111111111111111111111111111111111111112');
+  const grantId = useDevnetConfig ? DEVNET_GRANT_CONFIG.grantId : BigInt(1);
+  const startTs = useDevnetConfig
+    ? DEVNET_GRANT_CONFIG.startTs
+    : BigInt(Math.floor(Date.now() / 1000) - 86400);
+  const periodSeconds = useDevnetConfig
+    ? DEVNET_GRANT_CONFIG.periodSeconds
+    : BigInt(2592000);
 
-  // PDA を計算
+  const [grantPda] = getGrantPda(authority, mint, grantId);
+  const periodIndex = calculatePeriodIndex(startTs, periodSeconds);
+
   const [vaultPda] = getVaultPda(grantPda);
   const [receiptPda] = getReceiptPda(grantPda, recipientPubkey, periodIndex);
 
-  // 受給者の ATA を取得
-  const claimerAta = await getAssociatedTokenAddress(dummyMint, recipientPubkey);
+  // DEV: claim 実行前の事前チェック（1ブロックで状態が分かる）
+  let vaultBalanceLog = '';
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    if (useDevnetConfig && DEVNET_GRANT_CONFIG) {
+      try {
+        const vaultAcc = await getAccount(connection, vaultPda);
+        vaultBalanceLog = vaultAcc.amount.toString();
+      } catch {
+        vaultBalanceLog = 'UNKNOWN (grant/vault 未存在?)';
+      }
+    }
+    console.log(
+      '[DEV_ENV] cluster=' + DEFAULT_CLUSTER +
+      ' rpc=' + RPC_URL +
+      ' programId=' + GRANT_PROGRAM_ID.toBase58() +
+      ' source=' + (useDevnetConfig ? 'devnetConfig' : 'dummy')
+    );
+    if (useDevnetConfig && DEVNET_GRANT_CONFIG) {
+      console.log(
+        '[DEV_GRANT] grantId=' + grantId.toString() +
+        ' mint=' + mint.toBase58() +
+        ' vault=' + vaultPda.toBase58() +
+        ' vaultBalance=' + (vaultBalanceLog || '-')
+      );
+    }
+  }
 
-  // トランザクションを作成
+  const claimerAta = await getAssociatedTokenAddress(mint, recipientPubkey);
+
   const tx = new Transaction();
 
-  // ATA が存在しない場合は作成命令を追加
   try {
     await getAccount(connection, claimerAta);
   } catch {
-    // ATA が存在しない場合は作成命令を追加
     tx.add(
       createAssociatedTokenAccountInstruction(
         recipientPubkey,
         claimerAta,
         recipientPubkey,
-        dummyMint
+        mint
       )
     );
   }
 
-  // claim_grant instruction を構築
   const instruction = await program.methods
     .claimGrant(new BN(periodIndex.toString()))
     .accounts({
       grant: grantPda,
-      mint: dummyMint,
+      mint,
       vault: vaultPda,
       claimer: recipientPubkey,
       claimerAta: claimerAta,
@@ -112,15 +148,9 @@ export async function buildClaimTx(
 
   tx.add(instruction);
 
-  // recentBlockhash を取得（送信しないが、tx の完全性のために）
-  let recentBlockhash: string | null = null;
-  try {
-    const { blockhash } = await connection.getLatestBlockhash('confirmed');
-    recentBlockhash = blockhash;
-    tx.recentBlockhash = blockhash;
-  } catch (error) {
-    console.warn('Failed to get recent blockhash:', error);
-  }
+  // recentBlockhash / lastValidBlockHeight を必ず取得（sendSignedTx の confirmContext に常に渡すため）
+  const { blockhash: recentBlockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  tx.recentBlockhash = recentBlockhash;
 
   // feePayer を設定（送信しないが、tx の完全性のために）
   tx.feePayer = recipientPubkey;
@@ -130,6 +160,7 @@ export async function buildClaimTx(
     meta: {
       feePayer: recipientPubkey,
       recentBlockhash,
+      lastValidBlockHeight,
       instructionCount: tx.instructions.length,
       grantPda,
       vaultPda,

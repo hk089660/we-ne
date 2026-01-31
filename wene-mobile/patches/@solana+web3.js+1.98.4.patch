@@ -1,0 +1,46 @@
+diff --git a/node_modules/@solana/web3.js/lib/index.native.js b/node_modules/@solana/web3.js/lib/index.native.js
+index d3c6d8f..1406e3a 100644
+--- a/node_modules/@solana/web3.js/lib/index.native.js
++++ b/node_modules/@solana/web3.js/lib/index.native.js
+@@ -391,36 +391,32 @@ const PACKET_DATA_SIZE = 1280 - 40 - 8;
+ const VERSION_PREFIX_MASK = 0x7f;
+ const SIGNATURE_LENGTH_IN_BYTES = 64;
+ 
++// Hermes/RN: Object.defineProperty(X.prototype, ...) causes "Cannot read property 'prototype' of undefined"
++// Use this.name in constructor instead of defineProperty on prototype
+ class TransactionExpiredBlockheightExceededError extends Error {
+   constructor(signature) {
+     super(`Signature ${signature} has expired: block height exceeded.`);
++    this.name = 'TransactionExpiredBlockheightExceededError';
+     this.signature = void 0;
+     this.signature = signature;
+   }
+ }
+-Object.defineProperty(TransactionExpiredBlockheightExceededError.prototype, 'name', {
+-  value: 'TransactionExpiredBlockheightExceededError'
+-});
+ class TransactionExpiredTimeoutError extends Error {
+   constructor(signature, timeoutSeconds) {
+     super(`Transaction was not confirmed in ${timeoutSeconds.toFixed(2)} seconds. It is ` + 'unknown if it succeeded or failed. Check signature ' + `${signature} using the Solana Explorer or CLI tools.`);
++    this.name = 'TransactionExpiredTimeoutError';
+     this.signature = void 0;
+     this.signature = signature;
+   }
+ }
+-Object.defineProperty(TransactionExpiredTimeoutError.prototype, 'name', {
+-  value: 'TransactionExpiredTimeoutError'
+-});
+ class TransactionExpiredNonceInvalidError extends Error {
+   constructor(signature) {
+     super(`Signature ${signature} has expired: the nonce is no longer valid.`);
++    this.name = 'TransactionExpiredNonceInvalidError';
+     this.signature = void 0;
+     this.signature = signature;
+   }
+ }
+-Object.defineProperty(TransactionExpiredNonceInvalidError.prototype, 'name', {
+-  value: 'TransactionExpiredNonceInvalidError'
+-});
+ 
+ class MessageAccountKeys {
+   constructor(staticAccountKeys, accountKeysFromLookups) {

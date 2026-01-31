@@ -2,6 +2,8 @@
 
 This document describes how we-ne integrates with Phantom wallet for transaction signing.
 
+**デバッグ**: signTransaction で戻らない場合は [PHANTOM_DEBUG.md](./PHANTOM_DEBUG.md) を参照。
+
 ## Overview
 
 we-ne uses Phantom's [deep link protocol](https://docs.phantom.app/phantom-deeplinks/deeplinks-ios-and-android) for mobile wallet integration. This allows non-custodial signing without exposing private keys to the app.

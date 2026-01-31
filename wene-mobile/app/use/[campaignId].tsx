@@ -117,7 +117,7 @@ export default function UseScreen() {
         dappEncryptionPublicKey,
         dappSecretKey,
         phantomEncryptionPublicKey,
-        redirectLink: 'wene://phantom/signTransaction',
+        redirectLink: 'wene://phantom/sign',
         cluster: 'devnet',
         appUrl: 'https://wene.app',
       });

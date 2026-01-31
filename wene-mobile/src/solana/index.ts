@@ -18,13 +18,21 @@ export {
   getProvider,
   getProgram,
   getReadonlyKeypair,
-  // 定数
+  // 定数（cluster 経由）
   CLUSTER,
   RPC_URL,
   // ステータス確認（デバッグ用）
   getSingletonStatus,
   resetSingletons,
 } from './singleton';
+
+// Cluster 定義（devnet 完全固定）
+export {
+  DEFAULT_CLUSTER,
+  DEVNET_RPC_FIXED,
+  getRpcUrl,
+  type SolanaCluster,
+} from './cluster';
 
 // ============================================================
 // 定数
@@ -46,7 +54,12 @@ export {
 // ============================================================
 // トランザクション送信
 // ============================================================
-export { sendSignedTx } from './sendTx';
+export {
+  sendSignedTx,
+  isBlockhashExpiredError,
+  formatSendError,
+  type ConfirmContext,
+} from './sendTx';
 
 // ============================================================
 // トランザクションビルダー

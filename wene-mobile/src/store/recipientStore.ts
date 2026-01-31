@@ -5,7 +5,10 @@ export type RecipientState =
   | 'Idle'
   | 'Connecting'
   | 'Connected'
-  | 'Claiming'
+  | 'Claiming' // 後方互換（実フローは Signing → Sending）
+  | 'Signing'  // Phantom起動〜署名完了待ち
+  | 'Sending'  // RPC送信中
+  | 'Done'     // 送信成功
   | 'Claimed'
   | 'Expired'
   | 'Error';
@@ -23,17 +26,30 @@ interface RecipientStore {
   lastError: string | null;
   isClaimed: boolean; // 受給済みかどうか
   lastSignature: string | null; // 直近の claim 署名（Claimed 時表示用）
+  lastDoneAt: number | null; // Done になった時刻（Date.now、成功時の可視化用）
   isUsed: boolean; // 使用済みかどうか
   lastUsedSignature: string | null; // 直近の use 署名（Used 時表示用）
+
+  // DEV のみ: 送信前デバッグ・simulation 失敗表示用
+  rpcEndpoint: string | null;
+  balanceLamports: number | null;
+  simulationErr: string | null;
+  simulationLogs: string[] | null;
+  simulationUnitsConsumed: number | null;
 
   // アクション
   setState: (state: RecipientState) => void;
   setLastSignature: (sig: string | null) => void;
+  setLastDoneAt: (t: number | null) => void;
+  setPreSendDebug: (rpcEndpoint: string, balanceLamports: number) => void;
+  setSimulationFailed: (err: string, logs: string[] | null, unitsConsumed?: number) => void;
+  clearSimulationResult: () => void;
   setPublicKey: (publicKey: string | null) => void;
   setWalletPubkey: (walletPubkey: string | null) => void;
   setPhantomSession: (session: string | null) => void;
   setCampaign: (campaignId: string, code?: string) => void;
   setError: (error: string) => void;
+  clearError: () => void;
   checkClaimed: (campaignId: string, walletPubkey?: string | null) => Promise<void>;
   markAsClaimed: (campaignId: string, walletPubkey?: string | null) => Promise<void>;
   checkUsed: (campaignId: string, walletPubkey?: string | null) => Promise<void>;
@@ -51,8 +67,14 @@ const initialState = {
   lastError: null,
   isClaimed: false,
   lastSignature: null,
+  lastDoneAt: null,
   isUsed: false,
   lastUsedSignature: null,
+  rpcEndpoint: null,
+  balanceLamports: null,
+  simulationErr: null,
+  simulationLogs: null,
+  simulationUnitsConsumed: null,
 };
 
 export const useRecipientStore = create<RecipientStore>((set, get) => ({
@@ -79,7 +101,28 @@ export const useRecipientStore = create<RecipientStore>((set, get) => ({
   
   setError: (error) => set({ state: 'Error', lastError: error }),
 
+  clearError: () => set({ lastError: null }),
+
   setLastSignature: (sig) => set({ lastSignature: sig }),
+
+  setLastDoneAt: (t) => set({ lastDoneAt: t }),
+
+  setPreSendDebug: (rpcEndpoint, balanceLamports) =>
+    set({ rpcEndpoint, balanceLamports }),
+
+  setSimulationFailed: (err, logs, unitsConsumed) =>
+    set({
+      simulationErr: err,
+      simulationLogs: logs ?? null,
+      simulationUnitsConsumed: unitsConsumed ?? null,
+    }),
+
+  clearSimulationResult: () =>
+    set({
+      simulationErr: null,
+      simulationLogs: null,
+      simulationUnitsConsumed: null,
+    }),
 
   checkClaimed: async (campaignId, walletPubkey) => {
     const claimed = await loadClaimed(campaignId, walletPubkey);

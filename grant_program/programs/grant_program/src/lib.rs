@@ -2,7 +2,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("8SVRtAyWXcd47PKeeMSGpC1oQFNt2yM865M46QgjKUZ");
+declare_id!("GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR");
 use anchor_spl::token::{
     close_account,
     transfer_checked,

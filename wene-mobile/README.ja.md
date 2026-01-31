@@ -163,6 +163,8 @@ npm run generate-icons
 npm run deploy:adb
 ```
 
+**DEV メモ**: Android 実機では claim フローがクラッシュせず動作する（成功 or 再試行に到達）。@coral-xyz/anchor の Wallet は RN で undefined になるため、自前の `KeypairWallet` を使用している。詳細は `docs/ANDROID_APK_DEPLOY_STEPS.md` 参照。
+
 このスクリプトは以下を実行:
 1. `icon-source.png` からアイコンを生成
 2. prebuild実行（アイコンをAndroidリソースに反映）

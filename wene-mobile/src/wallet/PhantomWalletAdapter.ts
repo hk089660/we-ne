@@ -72,7 +72,7 @@ export class PhantomWalletAdapter implements WalletAdapter {
       dappEncryptionPublicKey: this._dappEncryptionPublicKey,
       dappSecretKey: this._dappSecretKey,
       phantomEncryptionPublicKey: this._phantomEncryptionPublicKey,
-      redirectLink: 'wene://phantom/signTransaction',
+      redirectLink: 'wene://phantom/sign?cluster=devnet',
       cluster: 'devnet',
       appUrl: 'https://wene.app',
     });

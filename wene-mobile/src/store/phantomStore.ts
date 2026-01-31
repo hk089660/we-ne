@@ -29,6 +29,10 @@ interface PhantomStore {
   setPhantomEncryptionPublicKey: (pk: string | null) => void;
   savePhantomConnectResult: (publicKey: string, session: string, phantomPublicKey: string) => Promise<void>;
   loadPhantomConnectResult: () => Promise<PhantomConnectResult | null>;
+  /** 接続開始前に古い session を破棄（decryption 不整合を防ぐ） */
+  clearConnectResult: () => Promise<void>;
+  /** v0用: 暗号キーペアと接続結果をすべて破棄（デバッグ・再接続用） */
+  clearPhantomKeys: () => Promise<void>;
 }
 
 const STORAGE_KEY = 'phantom_encryption_keypair';
@@ -121,5 +125,23 @@ export const usePhantomStore = create<PhantomStore>((set, get) => ({
       console.error('[phantomStore] loadPhantomConnectResult error:', e);
       return null;
     }
+  },
+
+  clearConnectResult: async () => {
+    await AsyncStorage.removeItem(STORAGE_KEY_CONNECT_RESULT);
+    set({ phantomEncryptionPublicKey: null });
+    console.log('[phantomStore] clearConnectResult done');
+  },
+
+  clearPhantomKeys: async () => {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    await AsyncStorage.removeItem(STORAGE_KEY_CONNECT_RESULT);
+    set({
+      encryptionKeyPair: null,
+      dappEncryptionPublicKey: null,
+      dappSecretKey: null,
+      phantomEncryptionPublicKey: null,
+    });
+    console.log('[phantomStore] clearPhantomKeys done');
   },
 }));

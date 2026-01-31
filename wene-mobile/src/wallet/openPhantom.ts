@@ -24,20 +24,18 @@ export async function openPhantomConnect(url: string): Promise<void> {
     throw error;
   }
 
-  // デバッグ用: URLの先頭をログ出力
   const urlPreview = url.length > 50 ? url.substring(0, 50) + '...' : url;
   console.log('[openPhantomConnect] URL:', urlPreview);
 
-  // canOpenURLは判定目的のログのみ（returnしない）
+  // canOpenURL を必ず事前確認（ログ用。AndroidではfalseでもopenURLを試す）
   try {
     const canOpen = await Linking.canOpenURL(url);
     console.log('[openPhantomConnect] canOpenURL:', canOpen);
   } catch (e) {
     console.log('[openPhantomConnect] canOpenURL error:', e);
-    // canOpenURLのエラーは無視して続行
   }
 
-  // 1. Linking.openURLを試す
+  // Linking.openURLを試す
   try {
     await Linking.openURL(url);
     console.log('[openPhantomConnect] Linking.openURL succeeded');

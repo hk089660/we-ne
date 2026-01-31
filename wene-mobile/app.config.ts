@@ -2,14 +2,17 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 
 /**
  * We-ne Mobile App Configuration
- * 
+ *
+ * scheme: 'wene' — Deeplink用。connect: wene://phantom/connect, sign: wene://phantom/sign
+ * android.intentFilters: expo prebuild で AndroidManifest に反映。ビルド済みAPKに含まれる。
+ *
  * Universal Links (iOS) and App Links (Android) are configured to handle
  * https://wene.app/r/* URLs. Custom scheme (wene://) is also supported.
- * 
+ *
  * For Universal Links to work, you need to deploy:
  * - iOS: https://wene.app/.well-known/apple-app-site-association
  * - Android: https://wene.app/.well-known/assetlinks.json
- * 
+ *
  * See README.md for detailed setup instructions.
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
@@ -29,7 +32,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: 'wene-mobile',
     slug: 'wene-mobile',
-    scheme: 'wene', // Custom scheme for deeplink (wene://r/*)
+    scheme: 'wene', // wene://r/*, wene://phantom/connect, wene://phantom/sign
     version: timestamp ? `1.0.0-${timestamp}` : '1.0.0',
     orientation: 'portrait',
     icon: './assets/icon.png',
@@ -55,7 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     package: 'jp.wene.app',
     intentFilters: [
-      // Custom scheme (wene://) for deeplink
+      // Custom scheme (wene://) for deeplink - Phantom redirect_link に wene://phantom/* を使用
       {
         action: 'VIEW',
         autoVerify: true,
@@ -90,6 +93,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   ],
   experiments: {
     typedRoutes: true,
+  },
+  extra: {
+    eas: {
+      projectId: 'a7a43c37-984c-4754-b086-5de205ecad1e',
+    },
   },
   };
 };

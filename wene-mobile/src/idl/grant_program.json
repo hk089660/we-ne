@@ -1,5 +1,5 @@
 {
-  "address": "8SVRtAyWXcd47PKeeMSGpC1oQFNt2yM865M46QgjKUZ",
+  "address": "GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR",
   "metadata": {
     "name": "grant_program",
     "version": "0.1.0",
@@ -99,7 +99,7 @@
         {
           "name": "receipt",
           "docs": [
-            "期間内1回の受給を保証するレシート"
+            "期間内1回の受給を保証するレシート（同一期間の二重 claim 時は init が失敗する）"
           ],
           "writable": true,
           "pda": {
@@ -244,7 +244,7 @@
         {
           "name": "receipt",
           "docs": [
-            "期間内1回の受給を保証するレシート"
+            "期間内1回の受給を保証するレシート（同一期間の二重 claim 時は init が失敗する）"
           ],
           "writable": true,
           "pda": {

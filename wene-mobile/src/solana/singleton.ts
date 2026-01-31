@@ -1,38 +1,37 @@
 /**
  * Solana Singleton Manager
- * 
+ *
  * Connection / Provider / Program を単一インスタンスで管理し、
  * Hot Reload や re-render で再生成されることを防ぐ。
- * 
+ *
  * 【安定性のポイント】
  * - モジュールスコープでインスタンスを保持
  * - 一度生成したら再利用（lazy singleton）
- * - cluster は devnet 固定（環境変数で切り替えない）
+ * - cluster は cluster.ts の DEFAULT_CLUSTER に集約（DEV=devnet, 本番=mainnet-beta）
  */
 
-import { Connection, Keypair, clusterApiUrl } from '@solana/web3.js';
-import { AnchorProvider, Program, Wallet } from '@coral-xyz/anchor';
-import { GRANT_PROGRAM_ID } from './config';
+import { Connection, Keypair } from '@solana/web3.js';
+import { AnchorProvider, Program } from '@coral-xyz/anchor';
+import { KeypairWallet } from './keypairWallet';
+import { getGrantProgramId, GRANT_PROGRAM_ID } from './config';
+import { DEFAULT_CLUSTER, getRpcUrl } from './cluster';
 import idl from '../idl/grant_program.json';
 
 // ============================================================
-// 定数（固定値）
+// Cluster / RPC（cluster.ts を唯一のソースとする）
 // ============================================================
 
-/** 
- * Cluster は devnet 固定
- * 環境変数や条件分岐で切り替えない
- */
-export const CLUSTER = 'devnet' as const;
+export const CLUSTER = DEFAULT_CLUSTER;
 
-/**
- * RPC URL は devnet 固定
- * clusterApiUrl を使用して公式エンドポイントを取得
- */
-export const RPC_URL = clusterApiUrl(CLUSTER);
+/** 現在の cluster に対応する RPC URL（getConnection 内で使用。import 時には new Connection しない） */
+function _getRpcUrl(): string {
+  return getRpcUrl(DEFAULT_CLUSTER);
+}
+
+export const RPC_URL = _getRpcUrl();
 
 // ============================================================
-// Singleton インスタンス（モジュールスコープで保持）
+// Singleton インスタンス（getConnection のみが new Connection を行う）
 // ============================================================
 
 let _connection: Connection | null = null;
@@ -46,18 +45,19 @@ let _readonlyKeypair: Keypair | null = null;
 
 /**
  * Connection を取得（シングルトン）
- * 
- * 【安定性】
- * - 一度生成したら同じインスタンスを返す
- * - Hot Reload でも再生成されない
+ * 唯一 new Connection を行う箇所。URL は getRpcUrl(DEFAULT_CLUSTER) で決まる。
  */
 export function getConnection(): Connection {
   if (!_connection) {
-    _connection = new Connection(RPC_URL, {
+    const url = _getRpcUrl();
+    _connection = new Connection(url, {
       commitment: 'confirmed',
-      // WebSocket の自動再接続を有効化
-      wsEndpoint: RPC_URL.replace('https://', 'wss://'),
+      wsEndpoint: url.replace('https://', 'wss://'),
     });
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[RPC] getConnection() rpcEndpoint=', _connection.rpcEndpoint, 'cluster=', CLUSTER);
+      console.log('[CLUSTER_CHECK]', { rpcEndpoint: _connection.rpcEndpoint, expected: 'devnet' });
+    }
   }
   return _connection;
 }
@@ -78,7 +78,11 @@ export function getReadonlyKeypair(): Keypair {
 
 /**
  * AnchorProvider を取得（シングルトン）
- * 
+ *
+ * 【RN × Anchor】anchor の Wallet は isBrowser 判定で undefined になりクラッシュするため、
+ * KeypairWallet（自前実装）を使用。Anchor の Wallet は一切 import しない。
+ * → Android 実機で claim フローが安全に動作する。
+ *
  * 【安定性】
  * - Connection と Keypair を再利用
  * - 署名が必要な場合は別途 Phantom で行う
@@ -86,8 +90,19 @@ export function getReadonlyKeypair(): Keypair {
 export function getProvider(): AnchorProvider {
   if (!_provider) {
     const connection = getConnection();
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[RPC] getProvider() connection.rpcEndpoint=', connection.rpcEndpoint);
+    }
     const keypair = getReadonlyKeypair();
-    const wallet = new Wallet(keypair);
+    const wallet = new KeypairWallet(keypair);
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('[getProvider] KeypairWallet DEV check:', {
+        publicKey: wallet.publicKey?.toBase58?.(),
+        signTransaction: typeof wallet.signTransaction,
+        signAllTransactions: typeof wallet.signAllTransactions,
+        payerPublicKey: wallet.payer?.publicKey?.toBase58?.(),
+      });
+    }
     _provider = new AnchorProvider(connection, wallet, {
       commitment: 'confirmed',
       preflightCommitment: 'confirmed',
@@ -106,16 +121,9 @@ export function getProvider(): AnchorProvider {
 export function getProgram(): Program {
   if (!_program) {
     const provider = getProvider();
-    
-    // IDL 内の address と GRANT_PROGRAM_ID の一致を検証
-    const idlAddress = (idl as any).address;
-    if (idlAddress !== GRANT_PROGRAM_ID.toBase58()) {
-      console.warn(
-        `[singleton] IDL address mismatch: IDL=${idlAddress}, config=${GRANT_PROGRAM_ID.toBase58()}`
-      );
-    }
-    
-    _program = new Program(idl as any, provider);
+    const programId = getGrantProgramId(CLUSTER);
+    const idlWithAddress = { ...(idl as object), address: programId.toBase58() };
+    _program = new Program(idlWithAddress as any, provider);
   }
   return _program;
 }

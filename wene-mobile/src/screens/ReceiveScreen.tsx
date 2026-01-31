@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Platform, ToastAndroid } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, ScrollView, TouchableOpacity, Platform, ToastAndroid, Alert, Linking } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PublicKey } from '@solana/web3.js';
@@ -11,7 +11,11 @@ import { AppText, Button, Card, Pill } from '../ui/components';
 import { theme } from '../ui/theme';
 import { buildClaimTx } from '../solana/txBuilders';
 import { signTransaction, initiatePhantomConnect, buildPhantomConnectUrl } from '../utils/phantom';
-import { sendSignedTx } from '../solana/sendTx';
+import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
+import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
+import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../solana/sendTx';
+import { getConnection } from '../solana/anchorClient';
+import { RPC_URL } from '../solana/singleton';
 
 export const ReceiveScreen: React.FC = () => {
   const { campaignId, code } = useLocalSearchParams<{
@@ -27,10 +31,21 @@ export const ReceiveScreen: React.FC = () => {
     walletPubkey,
     phantomSession,
     lastSignature,
+    lastDoneAt,
     setCampaign,
     setState,
     setError,
+    clearError,
     setLastSignature,
+    setLastDoneAt,
+    rpcEndpoint,
+    balanceLamports,
+    simulationErr,
+    simulationLogs,
+    simulationUnitsConsumed,
+    setPreSendDebug,
+    setSimulationFailed,
+    clearSimulationResult,
     checkClaimed,
     markAsClaimed,
   } = useRecipientStore();
@@ -41,12 +56,17 @@ export const ReceiveScreen: React.FC = () => {
     loadKeyPair,
     getOrCreateKeyPair,
     saveKeyPair,
+    clearConnectResult,
+    clearPhantomKeys,
   } = usePhantomStore();
   const [showDetails, setShowDetails] = useState(false);
   const [grant, setGrant] = useState<Grant | null>(null);
   const [grantNotFound, setGrantNotFound] = useState(false);
   const [grantLoading, setGrantLoading] = useState(true);
   const [txDebugInfo, setTxDebugInfo] = useState<string | null>(null);
+  const [phantomUrlDebug, setPhantomUrlDebug] = useState<ReturnType<typeof getLastPhantomDebug> | null>(null);
+  const [signedTxSize, setSignedTxSize] = useState<number | null>(null); // DEV: 署名済みTxサイズ
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (campaignId) {
@@ -69,6 +89,29 @@ export const ReceiveScreen: React.FC = () => {
     };
     init();
   }, [loadKeyPair, getOrCreateKeyPair, saveKeyPair]);
+
+  // adb ログ用: ボタン有効条件を定期的に出力（adb logcat | grep RECEIVE_BTN）
+  useEffect(() => {
+    const logButtonState = () => {
+      const needConnect = !walletPubkey || !phantomSession || !phantomEncryptionPublicKey;
+      const hasKeys = !!(dappEncryptionPublicKey && dappSecretKey);
+      const canClaim = !needConnect && hasKeys && !!campaignId && !isClaimed;
+      const btnDisabled = state === 'Expired' || state === 'Claiming' || state === 'Connecting' || state === 'Signing' || state === 'Sending';
+      const reason = needConnect
+        ? `needConnect(wallet=${!!walletPubkey} session=${!!phantomSession} phantomPk=${!!phantomEncryptionPublicKey})`
+        : btnDisabled
+          ? `btnDisabled(state=${state})`
+          : canClaim
+            ? 'enabled'
+            : `blocked(claimed=${isClaimed} campaign=${!!campaignId})`;
+      console.log(
+        `[RECEIVE_BTN] state=${state} ${reason} dappKey=${!!dappEncryptionPublicKey} dappSecret=${!!dappSecretKey}`
+      );
+    };
+    logButtonState();
+    const t = setInterval(logButtonState, 8000);
+    return () => clearInterval(t);
+  }, [state, walletPubkey, phantomSession, phantomEncryptionPublicKey, dappEncryptionPublicKey, dappSecretKey, campaignId, isClaimed]);
 
   useEffect(() => {
     if (!campaignId) {
@@ -99,81 +142,240 @@ export const ReceiveScreen: React.FC = () => {
   const getButtonTitle = (): string => {
     switch (state) {
       case 'Idle':
+      case 'Connected':
         return 'このクレジットを受け取る';
       case 'Connecting':
         return 'Phantomを開いています…';
+      case 'Signing':
+        return 'Phantomで署名してください';
+      case 'Sending':
+        return '送信中…';
       case 'Claiming':
         return '処理中…';
       case 'Error':
         return '再試行';
+      case 'Done':
+        return '完了';
       default:
         return '受け取る';
     }
   };
 
+  /** Claim フロー用の状態メッセージ（Signing / Sending / Error / Done） */
+  const getClaimStatusMessage = (): string | null => {
+    switch (state) {
+      case 'Signing':
+        return 'Phantomで署名してください';
+      case 'Sending':
+        return '送信中…';
+      case 'Error':
+        return lastError ?? 'エラーが発生しました';
+      case 'Done':
+        return '受け取りが完了しました';
+      default:
+        return null;
+    }
+  };
+
+  /**
+   * DEV DEBUG ブロック文字列を組み立て（console.log とコピー用で共通）。
+   * 引数は store の string | number | string[] 等のプリミティブ・配列のみ。
+   * Android 実機でも安全に動作する。
+   */
+  const buildDevDebugBlock = (
+    source: string,
+    st: {
+      simulationErr: string | null;
+      simulationLogs: string[] | null;
+      simulationUnitsConsumed: number | null;
+      rpcEndpoint: string | null;
+      balanceLamports: number | null;
+    }
+  ): string =>
+    `--- DEV DEBUG (${source}) ---
+simulationErr:
+${st.simulationErr ?? 'null'}
+
+simulationLogs（最後の10行）:
+${(st.simulationLogs?.slice(-10) ?? []).join('\n') || '(no logs)'}
+
+simulationUnitsConsumed:
+${st.simulationUnitsConsumed ?? 'null'}
+
+rpcEndpoint:
+${st.rpcEndpoint ?? '(unknown)'}
+
+balanceLamports:
+${st.balanceLamports ?? 'null'}
+--- END ---`;
+
+  /**
+   * DEV 時のみ: state 更新後に DEV DEBUG ブロックを console に1回出力。
+   * store のプリミティブ値のみを渡し、console.log で安全に出力する。
+   */
+  const logDevDebugBlock = (source: string) => {
+    const st = useRecipientStore.getState();
+    const devDebugBlock = buildDevDebugBlock(source, {
+      simulationErr: st.simulationErr,
+      simulationLogs: st.simulationLogs,
+      simulationUnitsConsumed: st.simulationUnitsConsumed,
+      rpcEndpoint: st.rpcEndpoint,
+      balanceLamports: st.balanceLamports,
+    });
+    console.log('[DEV_DEBUG_BLOCK]\n' + devDebugBlock);
+  };
+
   const handleConnect = async () => {
-    if (!dappEncryptionPublicKey || !dappSecretKey) return;
+    console.log('[CONNECT] press');
+    if (!dappEncryptionPublicKey || !dappSecretKey) {
+      console.log('[CONNECT] guard: missing dappEncryptionPublicKey or dappSecretKey');
+      return;
+    }
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
     setState('Connecting');
+    const CONNECT_TIMEOUT_MS = 45000; // 45秒でタイムアウト
+    connectTimeoutRef.current = setTimeout(() => {
+      connectTimeoutRef.current = null;
+      const current = useRecipientStore.getState().state;
+      if (current === 'Connecting') {
+        useRecipientStore.getState().setState('Idle');
+        useRecipientStore.getState().setError('接続に失敗しました。もう一度お試しください。');
+        console.log('[RECEIVE_BTN] Connecting timeout, state→Idle');
+        if (Platform.OS === 'android') {
+          ToastAndroid.show('Phantom接続がタイムアウトしました', ToastAndroid.LONG);
+        }
+      }
+    }, CONNECT_TIMEOUT_MS);
     try {
+      await clearConnectResult();
+      useRecipientStore.getState().setWalletPubkey(null);
+      useRecipientStore.getState().setPhantomSession(null);
+      const kp = getOrCreateKeyPair();
+      await saveKeyPair(kp);
+
+      // Web: 浅い固定パスで戻りを確実に。Native: カスタムスキーム
+      const PHANTOM_CALLBACK_PATH = '/phantom-callback';
+      let redirectLink: string;
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.origin) {
+        redirectLink = window.location.origin + PHANTOM_CALLBACK_PATH;
+        if (!redirectLink.startsWith('https://')) {
+          console.warn('[handleConnect] redirect_link is not HTTPS on web:', redirectLink);
+        }
+      } else {
+        redirectLink = 'wene://phantom/connect?cluster=devnet';
+      }
+      console.log('[handleConnect] redirect_link (fixed path):', redirectLink);
+
       const connectUrl = buildPhantomConnectUrl({
-        dappEncryptionPublicKey,
-        redirectLink: 'wene://phantom/connect',
+        dappEncryptionPublicKey: usePhantomStore.getState().dappEncryptionPublicKey!,
+        redirectLink,
         cluster: 'devnet',
         appUrl: 'https://wene.app',
       });
-      
-      console.log('[handleConnect] connectUrl:', connectUrl);
-      
+
+      console.log('[PHANTOM] connect 送信 URL 全文:', connectUrl);
+
       if (Platform.OS === 'android') {
-        const urlPreview = connectUrl && connectUrl.length > 0 
-          ? connectUrl.substring(0, 30) + '...' 
+        const urlPreview = connectUrl && connectUrl.length > 0
+          ? connectUrl.substring(0, 30) + '...'
           : 'URL未設定';
         ToastAndroid.show(`URL: ${urlPreview}`, ToastAndroid.SHORT);
       }
-      
+
       await initiatePhantomConnect(
-        dappEncryptionPublicKey,
-        dappSecretKey,
-        'wene://phantom/connect',
+        usePhantomStore.getState().dappEncryptionPublicKey!,
+        usePhantomStore.getState().dappSecretKey!,
+        redirectLink,
         'devnet',
         'https://wene.app'
       );
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[CONNECT] exception:', msg, e);
       setState('Idle');
-      setError(e instanceof Error ? e.message : 'Phantomを開けません');
+      setError(msg);
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
+      Alert.alert('Phantomを開けませんでした', msg);
     }
   };
 
+  useEffect(() => {
+    return () => {
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  // DEV: Phantom URL をポーリングして画面表示（Connecting / Signing 中）
+  useEffect(() => {
+    if (!__DEV__) return;
+    if (state !== 'Signing' && state !== 'Claiming' && state !== 'Connecting') return;
+    const t = setInterval(() => setPhantomUrlDebug(getLastPhantomDebug()), 500);
+    return () => clearInterval(t);
+  }, [__DEV__, state]);
+
   const handleClaim = async () => {
-    if (state === 'Error') {
-      setState('Idle');
-      setTxDebugInfo(null);
-      return;
-    }
-    
-    if (isClaimed || state === 'Claimed') {
-      router.replace('/wallet' as any);
-      return;
-    }
-    
-    if (state !== 'Idle') return;
-
-    setState('Claiming');
-    setTxDebugInfo(null);
-
-    if (!walletPubkey || !phantomSession || !phantomEncryptionPublicKey || !dappEncryptionPublicKey || !dappSecretKey) {
-      setError('Phantomに接続してください');
-      setState('Idle');
-      return;
-    }
-
+    console.log('[CLAIM] checkpoint 1: press');
     try {
-      const recipientPubkey = new PublicKey(walletPubkey);
-      const result = await buildClaimTx({
-        campaignId: campaignId || '',
-        code,
-        recipientPubkey,
-      });
+      if (state === 'Error') {
+        console.log('[CLAIM] checkpoint 2a: guard state=Error');
+        clearError();
+        setState('Idle');
+        setTxDebugInfo(null);
+        return;
+      }
+      if (isClaimed || state === 'Claimed') {
+        console.log('[CLAIM] checkpoint 2b: guard already claimed');
+        router.replace('/wallet' as any);
+        return;
+      }
+      if (state !== 'Idle' && state !== 'Connected' && state !== 'Claiming') {
+        console.log('[CLAIM] checkpoint 2c: guard state not ready, state=', state);
+        return;
+      }
+      if (!walletPubkey || !phantomSession || !phantomEncryptionPublicKey || !dappEncryptionPublicKey || !dappSecretKey) {
+        console.log('[CLAIM] checkpoint 2d: guard missing phantom keys');
+        setError('Phantomに接続してください');
+        setState('Idle');
+        return;
+      }
+      if (!campaignId) {
+        console.log('[CLAIM] checkpoint 2e: guard campaignId empty');
+        setError('キャンペーンIDがありません');
+        setState('Idle');
+        return;
+      }
+
+      console.log('[CLAIM] checkpoint 3: guards passed, setState Signing');
+      setState('Signing');
+      setTxDebugInfo(null);
+      setSignedTxSize(null);
+      if (__DEV__) clearSimulationResult();
+
+      let result: Awaited<ReturnType<typeof buildClaimTx>>;
+      try {
+        const recipientPubkey = new PublicKey(walletPubkey);
+        console.log('[CLAIM] checkpoint 4: before buildClaimTx');
+        result = await buildClaimTx({
+          campaignId: campaignId || '',
+          code,
+          recipientPubkey,
+        });
+        console.log('[CLAIM] checkpoint 5: buildClaimTx done');
+      } catch (e) {
+        console.error('[CLAIM] buildClaimTx failed:', e);
+        console.error('[CLAIM] buildClaimTx error obj', e);
+        console.error('[CLAIM] buildClaimTx error stack', (e as Error)?.stack);
+        throw e;
+      }
 
       const debugLines = [
         `Fee Payer: ${result.meta.feePayer?.toBase58() || 'N/A'}`,
@@ -182,25 +384,187 @@ export const ReceiveScreen: React.FC = () => {
       ];
       setTxDebugInfo(debugLines.join('\n'));
 
-      const signed = await signTransaction({
-        tx: result.tx,
-        session: phantomSession,
-        dappEncryptionPublicKey,
-        dappSecretKey,
-        phantomEncryptionPublicKey,
-        redirectLink: 'wene://phantom/signTransaction',
-        cluster: 'devnet',
-        appUrl: 'https://wene.app',
-      });
+      // --- Signing: Phantom で署名（成功を先に確定） ---
+      let signed: Awaited<ReturnType<typeof signTransaction>>;
+      try {
+        const signRedirectLink = 'wene://phantom/sign?cluster=devnet';
+        console.log('[PHANTOM] sign redirect_link:', signRedirectLink);
+        console.log('[CLAIM] checkpoint 6: before signTransaction (Phantom起動)');
+        const SIGN_TIMEOUT_MS = 120000;
+        signed = await Promise.race([
+          signTransaction({
+            tx: result.tx,
+            session: phantomSession,
+            dappEncryptionPublicKey,
+            dappSecretKey,
+            phantomEncryptionPublicKey,
+            redirectLink: signRedirectLink,
+            cluster: 'devnet',
+            appUrl: 'https://wene.app',
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => {
+              const timeoutMsg = 'Phantom署名がタイムアウトしました。Phantomからアプリに戻れていない可能性があります。';
+              rejectPendingSignTx(new Error(timeoutMsg));
+              reject(new Error(timeoutMsg));
+            }, SIGN_TIMEOUT_MS)
+          ),
+        ]);
+        console.log('[CLAIM] checkpoint 7: signTransaction done');
+        // 署名成功を確定: 存在チェックとサイズログ（この時点では送信しない）
+        if (signed) {
+          const serialized = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
+          const len = serialized.length;
+          console.log('[CLAIM] signedTx exists, serialize().length=', len);
+          setSignedTxSize(len);
+        } else {
+          console.warn('[CLAIM] signedTx is falsy');
+        }
+      } catch (e) {
+        console.error('[CLAIM] signTransaction failed:', e);
+        console.error('[CLAIM] signTransaction error obj', e);
+        console.error('[CLAIM] signTransaction error stack', (e as Error)?.stack);
+        throw e;
+      }
 
-      const signature = await sendSignedTx(signed);
-      setLastSignature(signature);
-      await markAsClaimed(campaignId || '', walletPubkey);
-      setState('Claimed');
-      router.replace('/wallet' as any);
+      // --- Sending: RPC 送信 → 確定確認（confirmContext は buildClaimTx で必ず取得した blockhash を渡す） ---
+      setState('Sending');
+      if (__DEV__) {
+        try {
+          const conn = getConnection();
+          const balance = await conn.getBalance(new PublicKey(walletPubkey));
+          setPreSendDebug(RPC_URL, balance);
+        } catch (balanceErr) {
+          console.warn('[CLAIM] DEV getBalance failed:', balanceErr);
+          setPreSendDebug(RPC_URL, 0);
+        }
+      }
+      let currentResult = result;
+      let currentSigned = signed;
+      let hasRetriedBlockhash = false;
+      let signature: string;
+      try {
+        while (true) {
+          const confirmContext: { blockhash: string; lastValidBlockHeight: number } = {
+            blockhash: currentResult.meta.recentBlockhash,
+            lastValidBlockHeight: currentResult.meta.lastValidBlockHeight,
+          };
+          try {
+            console.log('[CLAIM] checkpoint 8: before sendSignedTx');
+            signature = await sendSignedTx(currentSigned, confirmContext);
+            console.log('[CLAIM] checkpoint 9: sendSignedTx done, txid=', signature);
+            break;
+          } catch (e) {
+            if (__DEV__ && isSimulationFailedError(e)) {
+              setSimulationFailed(
+                JSON.stringify(e.simErr),
+                e.simLogs,
+                e.unitsConsumed
+              );
+              throw e;
+            }
+            const errMsg = e instanceof Error ? e.message : String(e);
+            console.error('[CLAIM] sendSignedTx failed:', e);
+            console.error('[CLAIM] sendSignedTx error stack', (e as Error)?.stack);
+            if (isBlockhashExpiredError(errMsg) && !hasRetriedBlockhash) {
+              hasRetriedBlockhash = true;
+              Alert.alert('再試行', '期限切れのため再試行します', [{ text: 'OK' }]);
+              if (Platform.OS === 'android') {
+                ToastAndroid.show('期限切れのため再試行します', ToastAndroid.SHORT);
+              }
+              setState('Signing');
+              currentResult = await buildClaimTx({
+                campaignId: campaignId || '',
+                code,
+                recipientPubkey: new PublicKey(walletPubkey),
+              });
+              const signRedirectLink = 'wene://phantom/sign?cluster=devnet';
+              currentSigned = await Promise.race([
+                signTransaction({
+                  tx: currentResult.tx,
+                  session: phantomSession,
+                  dappEncryptionPublicKey,
+                  dappSecretKey,
+                  phantomEncryptionPublicKey,
+                  redirectLink: signRedirectLink,
+                  cluster: 'devnet',
+                  appUrl: 'https://wene.app',
+                }),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => {
+                    rejectPendingSignTx(new Error('Phantom署名がタイムアウトしました'));
+                    reject(new Error('Phantom署名がタイムアウトしました'));
+                  }, 120000)
+                ),
+              ]);
+              setState('Sending');
+              continue;
+            }
+            setError(errMsg);
+            const shortMsg = errMsg.length > 50 ? errMsg.substring(0, 50) + '…' : errMsg;
+            Alert.alert('送信に失敗しました', shortMsg, [{ text: 'OK' }]);
+            if (Platform.OS === 'android') {
+              ToastAndroid.show(shortMsg, ToastAndroid.LONG);
+            }
+            return;
+          }
+        }
+        setLastSignature(signature);
+        setLastDoneAt(Date.now());
+        setState('Done');
+      } catch (e) {
+        if (__DEV__ && isSimulationFailedError(e)) {
+          setSimulationFailed(
+            JSON.stringify(e.simErr),
+            e.simLogs,
+            e.unitsConsumed
+          );
+          logDevDebugBlock('outer-catch');
+          setError('SIMULATION FAILED\n' + JSON.stringify(e.simErr));
+          setState('Error');
+          Alert.alert('シミュレーション失敗', '送信前にシミュレーションで失敗しました。DEV 枠のログを確認してください。', [{ text: 'OK' }]);
+          return;
+        }
+        const errMsg = e instanceof Error ? e.message : String(e);
+        console.error('[CLAIM] sendSignedTx failed:', e);
+        console.error('[CLAIM] sendSignedTx error stack', (e as Error)?.stack);
+        setError(errMsg);
+        const shortMsg = errMsg.length > 50 ? errMsg.substring(0, 50) + '…' : errMsg;
+        Alert.alert('送信に失敗しました', shortMsg, [{ text: 'OK' }]);
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(shortMsg, ToastAndroid.LONG);
+        }
+        return;
+      }
+      console.log('[CLAIM] checkpoint 10: success (Done)');
     } catch (error) {
-      console.error('Claim failed:', error);
-      setError(error instanceof Error ? error.message : '受け取り処理に失敗しました');
+      try {
+        const msg = error && typeof error === 'object' && 'message' in error
+          ? String((error as Error).message)
+          : String(error);
+        if (__DEV__) {
+          console.error('[CLAIM] exception:', msg, error);
+          console.error('[CLAIM] error stack', (error as Error)?.stack ?? '(no stack)');
+        }
+        setError(msg);
+        const shortMsg = msg.length > 50 ? msg.substring(0, 50) + '…' : msg;
+        Alert.alert('受け取りに失敗しました', shortMsg, [{ text: 'OK' }]);
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(shortMsg, ToastAndroid.LONG);
+        }
+      } catch (innerErr) {
+        if (__DEV__) {
+          console.error('[CLAIM] outer catch failed:', innerErr);
+        }
+        setError('エラーが発生しました');
+      }
+    } finally {
+      console.log('[CLAIM] finally: entered');
+      const current = useRecipientStore.getState().state;
+      if (current === 'Signing' || current === 'Sending') {
+        console.log('[CLAIM] finally: clearing Signing/Sending state');
+        setState('Idle');
+      }
     }
   };
 
@@ -301,15 +665,52 @@ export const ReceiveScreen: React.FC = () => {
             )}
           </Card>
 
-          {lastError && state === 'Error' && (
-            <Card style={styles.errorCard}>
-              <AppText variant="caption" style={styles.errorText}>
-                {lastError}
+          {/* 状態メッセージ: Signing / Sending / Error / Done */}
+          {getClaimStatusMessage() != null && (
+            <Card style={state === 'Error' ? styles.errorCard : styles.statusCard}>
+              <AppText variant="body" style={state === 'Error' ? styles.errorTitle : styles.statusTitle}>
+                {getClaimStatusMessage()}
               </AppText>
+              {state === 'Error' && lastError && (
+                <AppText variant="caption" style={styles.errorText}>
+                  {lastError}
+                </AppText>
+              )}
+              {state === 'Done' && lastSignature && (
+                <>
+                  <AppText variant="caption" style={styles.txidText}>
+                    txid: {lastSignature.length > 16 ? lastSignature.slice(0, 8) + '…' + lastSignature.slice(-8) : lastSignature}
+                  </AppText>
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL(`https://explorer.solana.com/tx/${lastSignature}?cluster=devnet`)}
+                    style={styles.explorerLinkTouch}
+                  >
+                    <AppText variant="caption" style={styles.explorerLinkText}>
+                      Devnet Explorer で見る
+                    </AppText>
+                  </TouchableOpacity>
+                  {lastDoneAt != null && (
+                    <AppText variant="caption" style={styles.doneAtText}>
+                      成功時刻: {new Date(lastDoneAt).toLocaleString('ja-JP')}
+                    </AppText>
+                  )}
+                </>
+              )}
+              {state === 'Error' && (
+                <Button
+                  title="再試行"
+                  onPress={() => {
+                    clearError();
+                    setState('Idle');
+                  }}
+                  variant="secondary"
+                  style={styles.retryButton}
+                />
+              )}
             </Card>
           )}
 
-          {txDebugInfo && state === 'Claiming' && (
+          {txDebugInfo && (state === 'Signing' || state === 'Sending' || state === 'Claiming') && (
             <Card style={styles.debugCard}>
               <AppText variant="caption" style={styles.debugLabel}>
                 TX構築情報（デバッグ）
@@ -319,7 +720,101 @@ export const ReceiveScreen: React.FC = () => {
               </AppText>
             </Card>
           )}
+          {__DEV__ && (state === 'Signing' || state === 'Claiming' || state === 'Connecting') && (phantomUrlDebug?.signUrl || phantomUrlDebug?.connectUrl) && (
+            <Card style={styles.debugCard}>
+              <AppText variant="caption" style={styles.debugLabel}>
+                Phantom URL（コピー用）
+              </AppText>
+              {phantomUrlDebug.signUrl ? (
+                <AppText variant="small" style={styles.debugText} selectable>
+                  {phantomUrlDebug.signUrl}
+                </AppText>
+              ) : null}
+              {phantomUrlDebug.connectUrl ? (
+                <AppText variant="small" style={styles.debugText} selectable>
+                  {phantomUrlDebug.connectUrl}
+                </AppText>
+              ) : null}
+              <AppText variant="caption" style={[styles.debugLabel, { marginTop: 8 }]}>
+                redirect_link raw: {phantomUrlDebug.redirectRaw}
+              </AppText>
+              <AppText variant="caption" style={styles.debugText}>
+                redirect_link encoded(1回): {phantomUrlDebug.redirectEncoded}
+              </AppText>
+            </Card>
+          )}
 
+          {__DEV__ && (rpcEndpoint != null || balanceLamports != null || simulationErr != null || (simulationLogs != null && simulationLogs.length > 0)) ? (
+            <Card style={styles.debugCard}>
+              <AppText variant="caption" style={styles.debugLabel}>
+                [DEV] 送信前・シミュレーション
+              </AppText>
+              {rpcEndpoint != null ? (
+                <AppText variant="small" style={styles.debugText} selectable numberOfLines={2}>
+                  rpcEndpoint: {rpcEndpoint}
+                </AppText>
+              ) : null}
+              {balanceLamports != null ? (
+                <>
+                  <AppText variant="small" style={styles.debugText}>
+                    balanceLamports: {balanceLamports}
+                  </AppText>
+                  {balanceLamports < 10_000_000 ? (
+                    <AppText variant="caption" style={styles.simWarningText}>
+                      警告: 残高が 0.01 SOL 未満です
+                    </AppText>
+                  ) : null}
+                </>
+              ) : null}
+              {simulationErr != null ? (
+                <AppText variant="caption" style={styles.debugLabel}>
+                  simulationErr:
+                </AppText>
+              ) : null}
+              {simulationErr != null ? (
+                <AppText variant="small" style={styles.debugText} selectable numberOfLines={10}>
+                  {simulationErr}
+                </AppText>
+              ) : null}
+              {simulationUnitsConsumed != null ? (
+                <AppText variant="small" style={styles.debugText}>
+                  unitsConsumed: {simulationUnitsConsumed}
+                </AppText>
+              ) : null}
+              {simulationLogs != null && simulationLogs.length > 0 ? (
+                <>
+                  <AppText variant="caption" style={styles.debugLabel}>
+                    simulationLogs（スクロール・コピー可）:
+                  </AppText>
+                  <ScrollView style={styles.simLogsScroll} nestedScrollEnabled>
+                    <AppText variant="small" style={styles.debugText} selectable>
+                      {simulationLogs.join('\n')}
+                    </AppText>
+                  </ScrollView>
+                </>
+              ) : null}
+              <AppText variant="caption" style={[styles.debugLabel, { marginTop: theme.spacing.sm }]}>
+                コピー用（そのまま貼り付け可）:
+              </AppText>
+              <AppText variant="small" style={styles.debugCopyBlock} selectable>
+                {buildDevDebugBlock('copy', {
+                  simulationErr,
+                  simulationLogs,
+                  simulationUnitsConsumed,
+                  rpcEndpoint,
+                  balanceLamports,
+                })}
+              </AppText>
+            </Card>
+          ) : null}
+
+          {Platform.OS === 'web' && (
+            <Card style={styles.pcNoticeCard}>
+                <AppText variant="caption" style={styles.pcNoticeText}>
+                生徒用は専用アプリ（iOS TestFlight / Android APK）をご利用ください。{'\n'}Webは管理者・補助用です。
+              </AppText>
+            </Card>
+          )}
           {(!walletPubkey || !phantomSession || !phantomEncryptionPublicKey) && !(isClaimed || state === 'Claimed') ? (
             <Card style={styles.debugCard}>
               <AppText variant="caption" style={styles.debugLabel}>
@@ -342,24 +837,69 @@ export const ReceiveScreen: React.FC = () => {
                 disabled={state === 'Connecting' || !!walletPubkey}
                 style={styles.claimButton}
               />
+              {Platform.OS === 'web' ? (
+                <TouchableOpacity
+                  onPress={() => router.push('/phantom-callback' as any)}
+                  style={styles.fallbackLinkTouch}
+                >
+                  <AppText variant="caption" style={styles.fallbackLinkText}>
+                    戻れない場合はこちら
+                  </AppText>
+                </TouchableOpacity>
+              ) : null}
+              {__DEV__ ? (
+                <TouchableOpacity
+                  onPress={async () => {
+                    await clearPhantomKeys();
+                    setState('Idle');
+                    setError('');
+                  }}
+                  style={styles.devResetTouch}
+                >
+                  <AppText variant="caption" style={styles.devResetText}>
+                    Phantomキーリセット (v0 debug)
+                  </AppText>
+                </TouchableOpacity>
+              ) : null}
             </Card>
           ) : null}
 
-          {isClaimed || state === 'Claimed' ? (
+          {(isClaimed || state === 'Claimed' || state === 'Done') ? (
             <View style={styles.claimedActions}>
+              {state === 'Done' && (
+                <AppText variant="body" style={styles.successMessage}>
+                  受け取りが完了しました
+                </AppText>
+              )}
               {lastSignature ? (
                 <Card style={styles.debugCard}>
                   <AppText variant="caption" style={styles.debugLabel}>
-                    署名 (devnet)
+                    {state === 'Done' ? 'txid (送信成功)' : '署名 (devnet)'}
                   </AppText>
                   <AppText variant="small" style={styles.debugText} numberOfLines={2}>
                     {lastSignature}
                   </AppText>
                 </Card>
               ) : null}
+              {__DEV__ && signedTxSize != null && (
+                <AppText variant="small" style={styles.devText}>
+                  [DEV] 署名済みTxサイズ: {signedTxSize} bytes
+                </AppText>
+              )}
+              {__DEV__ && state === 'Error' && lastError && (
+                <AppText variant="small" style={styles.devText} numberOfLines={5}>
+                  [DEV] エラー全文: {lastError}
+                </AppText>
+              )}
               <Button
                 title="ウォレットを見る"
-                onPress={() => router.replace('/wallet' as any)}
+                onPress={async () => {
+                  if (state === 'Done' && campaignId && walletPubkey) {
+                    await markAsClaimed(campaignId, walletPubkey);
+                    setState('Claimed');
+                  }
+                  router.replace('/wallet' as any);
+                }}
                 variant="primary"
                 style={styles.claimedButton}
               />
@@ -375,8 +915,8 @@ export const ReceiveScreen: React.FC = () => {
               title={getButtonTitle()}
               onPress={handleClaim}
               variant="primary"
-              loading={state === 'Claiming' || state === 'Connecting'}
-              disabled={state === 'Expired' || state === 'Claiming' || state === 'Connecting'}
+              loading={state === 'Signing' || state === 'Sending' || state === 'Claiming' || state === 'Connecting'}
+              disabled={state === 'Expired' || state === 'Claiming' || state === 'Connecting' || state === 'Signing' || state === 'Sending'}
               style={styles.claimButton}
             />
           )}
@@ -438,12 +978,79 @@ const styles = StyleSheet.create({
   claimButton: {
     marginTop: theme.spacing.md,
   },
+  statusCard: {
+    backgroundColor: theme.colors.gray50,
+    marginBottom: theme.spacing.md,
+  },
+  statusTitle: {
+    marginBottom: theme.spacing.xs,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
   errorCard: {
     backgroundColor: theme.colors.gray50,
     marginBottom: theme.spacing.md,
   },
+  errorTitle: {
+    marginBottom: theme.spacing.xs,
+    color: theme.colors.error,
+    fontWeight: '600',
+  },
   errorText: {
     color: theme.colors.error,
+    marginBottom: theme.spacing.sm,
+  },
+  txidText: {
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+  },
+  explorerLinkTouch: {
+    marginTop: theme.spacing.xs,
+  },
+  explorerLinkText: {
+    color: theme.colors.primary,
+    textDecorationLine: 'underline',
+  },
+  doneAtText: {
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
+    fontSize: 12,
+  },
+  simWarningText: {
+    color: theme.colors.error,
+    marginTop: theme.spacing.xs,
+  },
+  simLogsScroll: {
+    maxHeight: 200,
+    marginTop: theme.spacing.xs,
+  },
+  debugCopyBlock: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11,
+    marginTop: theme.spacing.xs,
+    padding: theme.spacing.xs,
+    backgroundColor: theme.colors.gray50,
+  },
+  successMessage: {
+    marginBottom: theme.spacing.sm,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
+  retryButton: {
+    marginTop: theme.spacing.sm,
+  },
+  devText: {
+    fontSize: 11,
+    color: theme.colors.textTertiary,
+    marginBottom: theme.spacing.xs,
+  },
+  pcNoticeCard: {
+    backgroundColor: theme.colors.gray50,
+    marginBottom: theme.spacing.md,
+  },
+  pcNoticeText: {
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
   },
   claimedActions: {
     marginTop: theme.spacing.md,
@@ -480,5 +1087,22 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 10,
     lineHeight: 14,
+  },
+  devResetTouch: {
+    marginTop: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
+  devResetText: {
+    color: theme.colors.textTertiary,
+    textDecorationLine: 'underline',
+    fontSize: 11,
+  },
+  fallbackLinkTouch: {
+    marginTop: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+  },
+  fallbackLinkText: {
+    color: theme.colors.textSecondary,
+    textDecorationLine: 'underline',
   },
 });

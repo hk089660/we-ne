@@ -4,10 +4,14 @@
 # 前提: 実機をUSB接続し、USBデバッグを有効にすること
 #
 # 使い方:
-#   cd wene-mobile && ./scripts/deploy-via-adb.sh
+#   cd wene-mobile && ./scripts/deploy-via-adb.sh           # 上書きインストール
+#   cd wene-mobile && ./scripts/deploy-via-adb.sh --clean   # クリーンインストール（既存アプリ削除後にインストール）
 
 set -e
 cd "$(dirname "$0")/.."
+
+CLEAN_INSTALL=
+[[ "${1:-}" == "--clean" ]] && CLEAN_INSTALL=1
 
 echo "=== 1. アイコン生成 ==="
 npm run generate-icons
@@ -15,6 +19,12 @@ npm run generate-icons
 echo ""
 echo "=== 2. Prebuild（アイコンをAndroidリソースに反映） ==="
 npm run build:prebuild
+
+# Hermes 有効化を保証（prebuild が上書きする場合がある）
+if grep -q '^hermesEnabled=false' android/gradle.properties 2>/dev/null; then
+  sed -i.bak 's/^hermesEnabled=false/hermesEnabled=true/' android/gradle.properties && rm -f android/gradle.properties.bak
+  echo "  hermesEnabled=true を反映しました"
+fi
 
 echo ""
 echo "=== 3. APKビルド ==="
@@ -50,10 +60,22 @@ if ! "$ADB_CMD" devices | grep -qE 'device$'; then
 fi
 "$ADB_CMD" devices -l
 
+if [[ -n "$CLEAN_INSTALL" ]]; then
+  echo ""
+  echo "=== 5a. 既存アプリをアンインストール（クリーン） ==="
+  "$ADB_CMD" uninstall jp.wene.app 2>/dev/null || true
+fi
+
+INSTALL_DESC="（既存は上書き）"
+[[ -n "$CLEAN_INSTALL" ]] && INSTALL_DESC="（新規）"
 echo ""
-echo "=== 5. ADB経由でインストール（既存アプリは上書き） ==="
-# -r: 上書き, -d: バージョンダウングレード時も許可（アイコン差し替え等で有用）
-"$ADB_CMD" install -r -d "$APK_PATH"
+echo "=== 5. ADB経由でインストール${INSTALL_DESC} ==="
+if [[ -n "$CLEAN_INSTALL" ]]; then
+  "$ADB_CMD" install "$APK_PATH"
+else
+  # -r: 上書き, -d: バージョンダウングレード時も許可（アイコン差し替え等で有用）
+  "$ADB_CMD" install -r -d "$APK_PATH"
+fi
 
 echo ""
 echo "=== 完了 ==="
