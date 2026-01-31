@@ -1,56 +1,100 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  RefreshControl,
+  TouchableOpacity,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { PublicKey } from '@solana/web3.js';
 import { useRecipientStore } from '../store/recipientStore';
-import { getGrantByCampaignId } from '../api/getGrant';
-import type { Grant } from '../types/grant';
-import { formatDeadlineJst, formatRemainingTime, isExpired as checkExpired } from '../utils/deadline';
-import { AppText, Card, Pill, Button } from '../ui/components';
+import { getConnection } from '../solana/singleton';
+import {
+  getSolBalance,
+  getTokenBalances,
+  formatMintShort,
+  type TokenBalanceItem,
+} from '../solana/wallet';
+import { AppText, Card, Button } from '../ui/components';
 import { theme } from '../ui/theme';
+
+const LAMPORTS_PER_SOL = 1e9;
 
 export const WalletScreen: React.FC = () => {
   const router = useRouter();
-  const { walletPubkey, campaignId, isUsed, checkUsed } = useRecipientStore();
-  const [grant, setGrant] = useState<Grant | null>(null);
+  const { walletPubkey } = useRecipientStore();
+  const [solBalance, setSolBalance] = useState<number | null>(null);
+  const [tokens, setTokens] = useState<TokenBalanceItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!campaignId) {
-      setGrant(null);
+  const fetchBalances = useCallback(async (isRefresh = false) => {
+    if (!walletPubkey) {
+      setSolBalance(null);
+      setTokens([]);
       setLoading(false);
-      setNotFound(false);
+      setError(null);
       return;
     }
-    setLoading(true);
-    setNotFound(false);
-    getGrantByCampaignId(campaignId)
-      .then((g) => {
-        if (g) {
-          setGrant(g);
-          setNotFound(false);
-        } else {
-          setGrant(null);
-          setNotFound(true);
-        }
-      })
-      .catch(() => {
-        setGrant(null);
-        setNotFound(true);
-      })
-      .finally(() => setLoading(false));
-    
-    if (campaignId && walletPubkey) {
-      checkUsed(campaignId, walletPubkey);
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
     }
-  }, [campaignId, walletPubkey, checkUsed]);
+    setError(null);
+    try {
+      const connection = getConnection();
+      const owner = new PublicKey(walletPubkey);
+      const [sol, tokenList] = await Promise.all([
+        getSolBalance(connection, owner),
+        getTokenBalances(connection, owner),
+      ]);
+      setSolBalance(sol);
+      setTokens(tokenList);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg.length > 80 ? msg.slice(0, 80) + '…' : msg);
+      setSolBalance(null);
+      setTokens([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [walletPubkey]);
 
-  const isExpired = grant ? checkExpired(grant) : false;
-  const balance = isUsed ? 0 : (grant?.balance ?? 0);
-  const canUse = !!campaignId && !!grant && !notFound && !isUsed && !isExpired;
+  useEffect(() => {
+    fetchBalances(false);
+  }, [fetchBalances]);
 
-  if (loading && campaignId) {
+  const onRefresh = useCallback(() => {
+    fetchBalances(true);
+  }, [fetchBalances]);
+
+  if (!walletPubkey) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <View style={styles.center}>
+          <AppText variant="h3" style={styles.title}>
+            保有トークン一覧
+          </AppText>
+          <AppText variant="body" style={styles.muted}>
+            Phantomに接続すると残高を表示できます
+          </AppText>
+          <Button
+            title="ホームに戻る"
+            onPress={() => router.replace('/')}
+            variant="secondary"
+            style={styles.topButton}
+          />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.center}>
@@ -64,94 +108,83 @@ export const WalletScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.content}>
-          <AppText variant="h2" style={styles.title}>
-            ウォレット
+      <View style={styles.header}>
+        <AppText variant="h2" style={styles.title}>
+          保有トークン一覧
+        </AppText>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+          <AppText variant="caption" style={styles.refreshText}>
+            更新
           </AppText>
+        </TouchableOpacity>
+      </View>
 
-          {grant && (
-            <AppText variant="caption" style={styles.grantTitle}>
-              {grant.title}
-            </AppText>
-          )}
-
-          <Card style={styles.balanceCard}>
-            <AppText variant="caption" style={styles.balanceLabel}>
-              残高
-            </AppText>
-            <AppText variant="h1" style={styles.balanceValue}>
-              {balance} Credit
-            </AppText>
-            {walletPubkey && (
-              <AppText variant="small" style={styles.pubkeyText}>
-                {walletPubkey.slice(0, 8)}...{walletPubkey.slice(-8)}
-              </AppText>
-            )}
-          </Card>
-
-          <Card style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <AppText variant="caption" style={styles.infoLabel}>
-                期限
-              </AppText>
-              <AppText variant="body" style={styles.infoValue}>
-                {grant ? formatDeadlineJst(grant) : '—'}
-              </AppText>
-            </View>
-
-            <View style={styles.infoRow}>
-              <AppText variant="caption" style={styles.infoLabel}>
-                残り時間
-              </AppText>
-              <AppText variant="body" style={styles.infoValue}>
-                {grant ? formatRemainingTime(grant) : '—'}
-              </AppText>
-            </View>
-
-            <View style={styles.statusRow}>
-              <AppText variant="caption" style={styles.infoLabel}>
-                ステータス
-              </AppText>
-              <Pill
-                label={isUsed ? '使用済み' : isExpired ? '期限切れ' : '有効'}
-                variant={isUsed ? 'active' : isExpired ? 'expired' : 'active'}
-              />
-            </View>
-          </Card>
-
+      {error ? (
+        <Card style={styles.errorCard}>
+          <AppText variant="caption" style={styles.errorText}>
+            {error}
+          </AppText>
           <Button
-            title={isUsed ? '使用済み' : '使う'}
-            onPress={() => {
-              if (canUse && campaignId) {
-                router.push(`/use/${campaignId}` as any);
-              }
-            }}
-            variant="primary"
-            disabled={!canUse}
-            style={styles.useButton}
+            title="再試行"
+            onPress={() => fetchBalances(false)}
+            variant="secondary"
+            style={styles.retryButton}
           />
+        </Card>
+      ) : null}
 
-          {!canUse && !isUsed && !isExpired && (
-            <AppText variant="small" style={styles.disabledNote}>
-              準備中
+      <View style={styles.solCardWrap}>
+        <Card style={styles.solCard}>
+          <AppText variant="caption" style={styles.solLabel}>
+            SOL 残高
+          </AppText>
+          <AppText variant="h1" style={styles.solValue}>
+            {solBalance != null
+              ? (solBalance / LAMPORTS_PER_SOL).toFixed(4)
+              : '—'}{' '}
+            SOL
+          </AppText>
+          <AppText variant="small" style={styles.pubkeyText}>
+            {walletPubkey.slice(0, 8)}…{walletPubkey.slice(-8)}
+          </AppText>
+        </Card>
+      </View>
+
+      <AppText variant="caption" style={styles.sectionLabel}>
+        トークン
+      </AppText>
+      <FlatList
+        data={tokens}
+        keyExtractor={(item) => item.ata ?? item.mint}
+        contentContainerStyle={
+          tokens.length === 0 ? styles.listEmpty : styles.listContent
+        }
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={
+          !error ? (
+            <View style={styles.emptyWrap}>
+              <AppText variant="body" style={styles.emptyText}>
+                トークンがありません
+              </AppText>
+            </View>
+          ) : null
+        }
+        renderItem={({ item }) => (
+          <Card style={styles.tokenCard}>
+            <AppText variant="caption" style={styles.tokenMint}>
+              {formatMintShort(item.mint)}
             </AppText>
-          )}
-          {isUsed && (
-            <AppText variant="small" style={styles.disabledNote}>
-              このクレジットは使用済みです
+            <AppText variant="h3" style={styles.tokenAmount}>
+              {item.amount}
             </AppText>
-          )}
-          {isExpired && !isUsed && (
-            <AppText variant="small" style={styles.disabledNote}>
-              期限切れのため使用できません
+            <AppText variant="small" style={styles.tokenDecimals}>
+              decimals: {item.decimals}
             </AppText>
-          )}
-        </View>
-      </ScrollView>
+          </Card>
+        )}
+      />
     </SafeAreaView>
   );
 };
@@ -161,58 +194,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    padding: theme.spacing.lg,
-  },
-  title: {
-    marginBottom: theme.spacing.lg,
-  },
-  balanceCard: {
-    marginBottom: theme.spacing.md,
-    alignItems: 'center',
-  },
-  balanceLabel: {
-    marginBottom: theme.spacing.sm,
-    color: theme.colors.textSecondary,
-  },
-  balanceValue: {
-    textAlign: 'center',
-  },
-  pubkeyText: {
-    marginTop: theme.spacing.sm,
-    textAlign: 'center',
-    color: theme.colors.textTertiary,
-  },
-  infoCard: {
-    marginBottom: theme.spacing.lg,
-  },
-  infoRow: {
-    marginBottom: theme.spacing.md,
-  },
-  statusRow: {
+  header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    paddingBottom: theme.spacing.sm,
   },
-  infoLabel: {
+  title: {
     marginBottom: theme.spacing.xs,
+  },
+  refreshButton: {
+    padding: theme.spacing.sm,
+  },
+  refreshText: {
     color: theme.colors.textSecondary,
-  },
-  infoValue: {
-    color: theme.colors.text,
-  },
-  useButton: {
-    marginTop: theme.spacing.md,
-  },
-  disabledNote: {
-    textAlign: 'center',
-    marginTop: theme.spacing.sm,
-    color: theme.colors.textTertiary,
   },
   center: {
     flex: 1,
@@ -223,9 +220,73 @@ const styles = StyleSheet.create({
   muted: {
     color: theme.colors.textSecondary,
     textAlign: 'center',
+    marginBottom: theme.spacing.lg,
   },
-  grantTitle: {
+  topButton: {
+    marginTop: theme.spacing.md,
+  },
+  errorCard: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+  },
+  errorText: {
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
+  },
+  retryButton: {
+    marginTop: theme.spacing.sm,
+  },
+  solCardWrap: {
+    paddingHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+  },
+  solCard: {
+    alignItems: 'center',
+  },
+  solLabel: {
     marginBottom: theme.spacing.sm,
     color: theme.colors.textSecondary,
+  },
+  solValue: {
+    textAlign: 'center',
+  },
+  pubkeyText: {
+    marginTop: theme.spacing.sm,
+    textAlign: 'center',
+    color: theme.colors.textTertiary,
+  },
+  sectionLabel: {
+    color: theme.colors.textSecondary,
+    paddingHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
+  },
+  listContent: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl,
+  },
+  listEmpty: {
+    flexGrow: 1,
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xl,
+  },
+  emptyWrap: {
+    paddingVertical: theme.spacing.xl,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: theme.colors.textSecondary,
+  },
+  tokenCard: {
+    marginBottom: theme.spacing.sm,
+  },
+  tokenMint: {
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
+  },
+  tokenAmount: {
+    marginBottom: theme.spacing.xs,
+  },
+  tokenDecimals: {
+    color: theme.colors.textTertiary,
   },
 });

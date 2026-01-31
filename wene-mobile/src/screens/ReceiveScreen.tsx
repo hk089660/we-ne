@@ -7,8 +7,12 @@ import { useRecipientStore } from '../store/recipientStore';
 import { usePhantomStore } from '../store/phantomStore';
 import { getGrantByCampaignId } from '../api/getGrant';
 import type { Grant } from '../types/grant';
-import { AppText, Button, Card, Pill } from '../ui/components';
+// --- changed ---
+
+import { AppText, BalanceList, BALANCE_LIST_DUMMY, Button, Card, Pill } from '../ui/components';
+import type { BalanceItem } from '../types/balance';
 import { theme } from '../ui/theme';
+import { sortBalances } from '../utils/balance';
 import { buildClaimTx } from '../solana/txBuilders';
 import { signTransaction, initiatePhantomConnect, buildPhantomConnectUrl } from '../utils/phantom';
 import { rejectPendingSignTx } from '../utils/phantomSignTxPending';
@@ -16,6 +20,7 @@ import { getLastPhantomDebug } from '../utils/phantomUrlDebug';
 import { sendSignedTx, isBlockhashExpiredError, isSimulationFailedError } from '../solana/sendTx';
 import { getConnection } from '../solana/anchorClient';
 import { RPC_URL } from '../solana/singleton';
+import { fetchSplBalance, fetchAnyPositiveSplBalance, formatAmountForDisplay, SPL_USDC_MINT } from '../solana/wallet';
 
 export const ReceiveScreen: React.FC = () => {
   const { campaignId, code } = useLocalSearchParams<{
@@ -67,6 +72,8 @@ export const ReceiveScreen: React.FC = () => {
   const [phantomUrlDebug, setPhantomUrlDebug] = useState<ReturnType<typeof getLastPhantomDebug> | null>(null);
   const [signedTxSize, setSignedTxSize] = useState<number | null>(null); // DEV: 署名済みTxサイズ
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [balanceItems, setBalanceItems] = useState<BalanceItem[]>(() => sortBalances(BALANCE_LIST_DUMMY));
+  const [splBalanceItem, setSplBalanceItem] = useState<BalanceItem | null>(null);
 
   useEffect(() => {
     if (campaignId) {
@@ -89,6 +96,156 @@ export const ReceiveScreen: React.FC = () => {
     };
     init();
   }, [loadKeyPair, getOrCreateKeyPair, saveKeyPair]);
+
+  // ウォレット接続時のみ SPL 残高を1件取得し、残高一覧にマージ・ソート（TODO/0/ATA無し時はフォールバック）
+  useEffect(() => {
+    if (!walletPubkey || !phantomSession) {
+      setSplBalanceItem(null);
+      setBalanceItems(sortBalances(BALANCE_LIST_DUMMY));
+      return;
+    }
+    let cancelled = false;
+    const connection = getConnection();
+    const ownerPubkey = new PublicKey(walletPubkey);
+
+    const loadingRow: BalanceItem = {
+      id: "spl-1",
+      name: "SPLトークン",
+      issuer: "Solana (devnet)",
+      amountText: "…",
+      unit: "SPL",
+      source: "spl",
+      todayUsable: true,
+    };
+    setSplBalanceItem(loadingRow);
+    setBalanceItems(sortBalances([...BALANCE_LIST_DUMMY, loadingRow]));
+
+    const applySplRow = (item: BalanceItem) => {
+      if (cancelled) return;
+      setSplBalanceItem(item);
+      setBalanceItems(sortBalances([...BALANCE_LIST_DUMMY, item]));
+    };
+
+    const isMintValid = !SPL_USDC_MINT.startsWith("TODO") && SPL_USDC_MINT.length >= 32;
+
+    if (!isMintValid) {
+      // TODO/無効 mint: フォールバックで uiAmount > 0 の最初の1件を表示
+      fetchAnyPositiveSplBalance(connection, ownerPubkey)
+        .then((fallback) => {
+          if (cancelled) return;
+          const item: BalanceItem = fallback
+            ? {
+                id: "spl-1",
+                name: "SPLトークン",
+                issuer: "Solana (devnet)",
+                amountText: fallback.amountText,
+                unit: fallback.unit,
+                source: "spl",
+                todayUsable: true,
+              }
+            : {
+                ...loadingRow,
+                amountText: "0.00",
+                unit: "SPL",
+              };
+          applySplRow(item);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          applySplRow({ ...loadingRow, amountText: "0.00", unit: "SPL" });
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // 有効 mint: 指定 mint を取得し、0 ならフォールバックを1回試す
+    const mintPubkey = new PublicKey(SPL_USDC_MINT);
+    fetchSplBalance(connection, ownerPubkey, mintPubkey)
+      .then(async (res) => {
+        if (cancelled) return;
+        const amountText = formatAmountForDisplay(res.amount, res.decimals, 2);
+        const isZero = res.amount === "0" || amountText === "0.00";
+        if (isZero) {
+          const fallback = await fetchAnyPositiveSplBalance(connection, ownerPubkey);
+          if (cancelled) return;
+          if (fallback) {
+            applySplRow({
+              id: "spl-1",
+              name: "SPLトークン",
+              issuer: "Solana (devnet)",
+              amountText: fallback.amountText,
+              unit: fallback.unit,
+              source: "spl",
+              todayUsable: true,
+            });
+          } else {
+            applySplRow({
+              id: "spl-1",
+              name: "USDC",
+              issuer: "Circle",
+              amountText: "0.00",
+              unit: "USDC",
+              source: "spl",
+              todayUsable: true,
+            });
+          }
+        } else {
+          applySplRow({
+            id: "spl-1",
+            name: "USDC",
+            issuer: "Circle",
+            amountText,
+            unit: "USDC",
+            source: "spl",
+            todayUsable: true,
+          });
+        }
+      })
+      .catch(async () => {
+        if (cancelled) return;
+        try {
+          const fallback = await fetchAnyPositiveSplBalance(connection, ownerPubkey);
+          if (cancelled) return;
+          if (fallback) {
+            applySplRow({
+              id: "spl-1",
+              name: "SPLトークン",
+              issuer: "Solana (devnet)",
+              amountText: fallback.amountText,
+              unit: fallback.unit,
+              source: "spl",
+              todayUsable: true,
+            });
+          } else {
+            applySplRow({
+              id: "spl-1",
+              name: "USDC",
+              issuer: "Circle",
+              amountText: "0.00",
+              unit: "USDC",
+              source: "spl",
+              todayUsable: true,
+            });
+          }
+        } catch {
+          if (cancelled) return;
+          applySplRow({
+            id: "spl-1",
+            name: "USDC",
+            issuer: "Circle",
+            amountText: "0.00",
+            unit: "USDC",
+            source: "spl",
+            todayUsable: true,
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [walletPubkey, phantomSession]);
 
   // adb ログ用: ボタン有効条件を定期的に出力（adb logcat | grep RECEIVE_BTN）
   useEffect(() => {
@@ -863,6 +1020,11 @@ ${st.balanceLamports ?? 'null'}
               ) : null}
             </Card>
           ) : null}
+
+          <BalanceList
+            connected={!!(walletPubkey && phantomSession)}
+            items={balanceItems}
+          />
 
           {(isClaimed || state === 'Claimed' || state === 'Done') ? (
             <View style={styles.claimedActions}>

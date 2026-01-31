@@ -11,3 +11,9 @@ export { AdminSearchBar } from './AdminSearchBar';
 export { AdminShell } from './AdminShell';
 export { StatusBadge } from './StatusBadge';
 export { DevRoleSwitcher } from './DevRoleSwitcher';
+export {
+  BalanceList,
+  BALANCE_LIST_DUMMY,
+  type BalanceItem,
+  type BalanceListProps,
+} from './BalanceList';

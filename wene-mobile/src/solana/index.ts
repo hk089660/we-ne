@@ -72,3 +72,18 @@ export {
   type BuildUseTxParams,
   type BuildUseTxResult,
 } from './txBuilders';
+
+// ============================================================
+// ウォレット残高（SOL / SPL）
+// ============================================================
+export {
+  getSolBalance,
+  getTokenBalances,
+  fetchSplBalance,
+  fetchAnyPositiveSplBalance,
+  formatAmountForDisplay,
+  formatMintShort,
+  SPL_USDC_MINT,
+  type TokenBalanceItem,
+  type FetchSplBalanceResult,
+} from './wallet';

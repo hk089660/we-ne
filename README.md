@@ -61,9 +61,9 @@ This use case prioritizes **speed, usability, and privacy**, making it suitable 
 
 ## Overview
 
-**日本語**: We-neは、Solana上で「即時に配布・即時に利用できる」支援クレジット基盤です。FairScaleのレピュテーションを用いて、不正や濫用を抑えつつ、モバイルから誰でもアクセスできます。現在はプロトタイプ段階で、Phantom連携と基本フローが動作しています。
+**日本語**: We-neは、Solana上で「即時に配布・即時に利用できる」支援クレジット基盤です。FairScaleのレピュテーションを用いて、不正や濫用を抑えつつ、モバイルから誰でもアクセスできます。現在はプロトタイプ段階で、Phantom連携と基本フローが動作しています。給付・クーポン・参加券・ブロックチェーン資産を単一の「残高一覧」として統合表示するプロトタイプであり、利用者は on-chain / off-chain を意識せず「今日使える価値」を直感的に確認できます。
 
-**English**: We-ne is an instant distribution and instant usage support credit infrastructure built on Solana. Using FairScale's reputation system, it prevents fraud and abuse while enabling mobile access for everyone. Currently in prototype stage, with Phantom integration and basic flow operational.
+**English**: We-ne is an instant distribution and instant usage support credit infrastructure built on Solana. Using FairScale's reputation system, it prevents fraud and abuse while enabling mobile access for everyone. Currently in prototype stage, with Phantom integration and basic flow operational. We-ne unifies **grants, coupons, participation tickets, and blockchain assets** into a single **balance list**; users see "value I can use today" at a glance without thinking about where it comes from (on-chain or off-chain).
 
 ---
 
@@ -72,6 +72,39 @@ This use case prioritizes **speed, usability, and privacy**, making it suitable 
 we-ne is a **non-custodial benefit distribution system** built on Solana, designed to deliver support payments instantly and transparently.
 
 **One-liner**: SPL token grants with periodic claims, double-claim prevention, and mobile wallet integration — all verifiable on-chain.
+
+---
+
+## Unified Balance List (Credits, Vouchers, and SPL Tokens)
+
+The app shows a **single balance list** that normalizes credits, vouchers, coupons, and SPL tokens into one **BalanceItem** model. Issuer and usability (e.g. "usable today") are shown in the UI so users understand *who* issued the value and *when* they can use it.
+
+### What appears in the list
+
+- **Demo Support Credits** (off-chain)
+- **Community / Event Vouchers** (off-chain)
+- **Merchant Coupons** (off-chain)
+- **SPL Tokens** from the connected wallet (on-chain, Devnet)
+
+### Design concept
+
+The goal of this UI is **not** to expose blockchain assets as something special, but to **normalize** them as part of everyday usable balances. Users do not see "on-chain" vs "off-chain"; they see a list of balances they can use. Web3 is integrated into a **life-style UI** where the source of value (issuer) defines its meaning — whether it is a grant, a coupon, or a token.
+
+> The goal of this UI is not to expose blockchain assets, but to normalize them as part of everyday usable balances.
+
+### UX rules (behavior)
+
+- Balances with expiration dates are prioritized.
+- Items expiring sooner are shown first.
+- **"Usable Today"** badges indicate immediate usability.
+- SPL token balances are merged into the list only after wallet connection.
+- Devnet fallback ensures at least one SPL row is always displayed when connected (fail-soft, demo-friendly).
+
+### Devnet / Demo note
+
+- SPL token balance is fetched from **Devnet**.
+- If a specific mint is unavailable (e.g. not deployed on Devnet), the app **safely falls back** to any positive SPL balance in the wallet.
+- This **fail-soft**, **demo-friendly** behavior keeps demos stable and avoids blank or broken states during review.
 
 ---
 
@@ -165,6 +198,8 @@ we-ne provides:
 | Home | Claim | Success |
 |------|-------|---------|
 | Connect wallet | Review grant details | Tokens received |
+
+*Unified balance list (credits, vouchers, SPL) appears on the receive screen below the grant card; screenshot placeholder.*
 
 ---
 
