@@ -28,6 +28,16 @@
 4) Student scan -> /u/join -> claim ok
 5) Admin /admin/participants and /admin/events/:id show logs; CSV download works (Web only)
 
+## 環境変数（Server）
+
+| 変数 | 説明 |
+|------|------|
+| SCHOOL_ADMIN_PASSCODE | 8桁数字のパスコード（例: 12345678）。サーバー環境変数のみ。 |
+| SCHOOL_ADMIN_WEB_ORIGIN | CORS 許可オリジン（カンマ区切り、例: http://localhost:8081） |
+| SCHOOL_JOIN_TOKEN_SECRET | join-token 署名鍵。サーバー環境変数のみ。EXPO_PUBLIC_* に含めない。 |
+| SCHOOL_REQUIRE_JOIN_TOKEN | 1=token必須（本番相当）、0=dev（token不要） |
+| PORT | サーバーポート（デフォルト 3000） |
+
 ## Notes
 - Secrets are server-only (NO EXPO_PUBLIC_*).
-- /claim does not redirect to /admin/login on 401 (student UX).
+- /claim の 401 では /admin/login へリダイレクトしない（学生UX考慮）。

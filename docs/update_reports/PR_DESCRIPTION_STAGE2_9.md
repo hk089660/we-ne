@@ -43,13 +43,23 @@ School MVP の Stage 2〜9 を main に取り込むための PR です。
 ## How to test (Web admin)
 
 1. **Server**（`wene-mobile/server/`）:
-   - `cd wene-mobile/server`
-   - `SCHOOL_ADMIN_PASSCODE=12345678 SCHOOL_ADMIN_WEB_ORIGIN="http://localhost:8081" SCHOOL_JOIN_TOKEN_SECRET="dev-secret" SCHOOL_REQUIRE_JOIN_TOKEN=0 npm start`
-   - ポート: 3000
 
-2. **Client**:
-   - `cd wene-mobile`
-   - `EXPO_PUBLIC_SCHOOL_API_URL=http://localhost:3000/school npx expo start --web -c`
+   ```bash
+   cd wene-mobile/server
+   SCHOOL_ADMIN_PASSCODE=12345678 \
+   SCHOOL_ADMIN_WEB_ORIGIN="http://localhost:8081" \
+   SCHOOL_JOIN_TOKEN_SECRET="dev-secret" \
+   SCHOOL_REQUIRE_JOIN_TOKEN=0 \
+   npm start
+   ```
+   ポート: 3000（デフォルト）
+
+2. **Client**（別ターミナル）:
+
+   ```bash
+   cd wene-mobile
+   EXPO_PUBLIC_SCHOOL_API_URL=http://localhost:3000/school npx expo start --web -c
+   ```
 
 3. **手順**:
    - 未ログインで `/admin` → `/admin/login` へリダイレクト
@@ -88,13 +98,28 @@ School MVP の Stage 2〜9 を main に取り込むための PR です。
 
 ---
 
+## Known issues
+
+- doctor:build の `addSharedParticipation` チェックを Stage2-9 実装（`submitSchoolClaim` / `addTicket`）に合わせて修正済み（本PRに含む）
+
+---
+
 ## Checklist
 
-- [x] Admin 認証（8桁パスコード + cookie）
-- [x] イベント作成・編集・QR印刷
-- [x] join-token 発行・検証
-- [x] Student claim フロー（冪等）
-- [x] participations 一覧・CSV
-- [x] server 永続化
-- [x] TypeScript 型チェック通過
-- [x] ルート `npm run build` 通過
+### 自動検証（実施済み）
+- [x] TypeScript 型チェック通過 (`npx tsc --noEmit`)
+- [x] ルート `npm run build` 通過（contract + mobile）
+- [x] doctor:build 通過
+
+### 手動テスト（要確認）
+- [ ] 未ログインで `/admin` → `/admin/login` へリダイレクト
+- [ ] 8桁パスコードでログイン → `/admin`
+- [ ] イベント作成 → 詳細 → 一覧に残る
+- [ ] `/admin/print/:eventId` で QR 表示（API有効時 join-token 付き）
+- [ ] 学生: `/u/scan` → `/u/join` → claim 成功
+- [ ] `/admin/participants` に参加ログ、イベント別絞り込み
+- [ ] CSV ダウンロード（Web のみ）
+
+---
+
+**Compare URL:** https://github.com/hk089660/-instant-grant-core/compare/main...school-mvp-stage2-9-xht?expand=1
