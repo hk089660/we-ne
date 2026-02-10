@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.text,
   },
   teacherMessage: {
-    backgroundColor: adminTheme.colors.highlightBackground ?? adminTheme.colors.surface,
+    backgroundColor: adminTheme.colors.surface,
     borderRadius: adminTheme.radius.md,
     padding: adminTheme.spacing.md,
     marginBottom: adminTheme.spacing.lg,
@@ -197,12 +197,12 @@ const styles = StyleSheet.create({
     marginTop: adminTheme.spacing.xs,
   },
   warningText: {
-    color: adminTheme.colors.warning ?? adminTheme.colors.textSecondary,
+    color: adminTheme.colors.textSecondary,
     maxWidth: 220,
     textAlign: 'right',
   },
   errorText: {
-    color: adminTheme.colors.error ?? '#d32f2f',
+    color: adminTheme.colors.textSecondary,
     marginBottom: adminTheme.spacing.sm,
   },
   retryButton: {
