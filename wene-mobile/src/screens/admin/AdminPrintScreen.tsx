@@ -7,7 +7,8 @@ import { AppText, Button, Card } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
 import { getMockAdminRole } from '../../data/adminMock';
 import { roleLabel } from '../../types/ui';
-import { buildPhantomBrowseUrl } from '../../utils/phantom';
+import { getSchoolDeps } from '../../api/createSchoolDeps';
+import type { SchoolEvent } from '../../types/school';
 
 export const AdminPrintScreen: React.FC = () => {
   const router = useRouter();
@@ -18,28 +19,50 @@ export const AdminPrintScreen: React.FC = () => {
   const printCardProps = { 'data-print-card': 'true' } as any;
   const printQrProps = { 'data-print-qr': 'true' } as any;
 
+  const [event, setEvent] = useState<SchoolEvent | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
-  const browseQrUrl = useMemo(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return '';
-    if (!eventId) return '';
-    const base = window.location.origin;
-    const scanPath = `/u/scan?eventId=${encodeURIComponent(eventId)}`;
-    return buildPhantomBrowseUrl(base, scanPath);
+  useEffect(() => {
+    if (!eventId) return;
+    let cancelled = false;
+    getSchoolDeps()
+      .eventProvider.getById(eventId)
+      .then((ev) => {
+        if (!cancelled) setEvent(ev ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setEvent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [eventId]);
 
+  const baseUrl = useMemo(() => {
+    const envBase = (process.env.EXPO_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+    if (envBase) return envBase;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return '';
+  }, []);
+
+  const canShowQr = event?.state === 'published' || (event && !event.state);
+  const scanUrl = useMemo(() => {
+    if (!eventId || !baseUrl || !canShowQr) return '';
+    return `${baseUrl}/u/scan?eventId=${encodeURIComponent(eventId)}`;
+  }, [eventId, baseUrl, canShowQr]);
+
   useEffect(() => {
-    if (Platform.OS !== 'web' || !browseQrUrl) {
+    if (Platform.OS !== 'web' || !scanUrl) {
       setQrDataUrl(null);
       return;
     }
-    QRCode.toDataURL(browseQrUrl, { width: 300, margin: 2 })
+    QRCode.toDataURL(scanUrl, { width: 300, margin: 2 })
       .then((url: string) => setQrDataUrl(url))
       .catch((err: unknown) => {
         console.error('QR生成エラー:', err);
         setQrDataUrl(null);
       });
-  }, [browseQrUrl]);
+  }, [scanUrl]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -99,14 +122,19 @@ export const AdminPrintScreen: React.FC = () => {
         ) : (
           <>
             <Card style={styles.card} {...printCardProps}>
+              {event && event.state && event.state !== 'published' ? (
+                <AppText variant="caption" style={styles.cardMuted}>
+                  無効（{event.state}）— QRは利用できません
+                </AppText>
+              ) : null}
               <AppText variant="h3" style={styles.cardText}>
-                地域清掃ボランティア
+                {event?.title ?? '…'}
               </AppText>
               <AppText variant="caption" style={styles.cardText}>
-                2026/02/02 09:00-10:30
+                {event?.datetime ?? '—'}
               </AppText>
               <AppText variant="caption" style={styles.cardText}>
-                主催: 生徒会
+                主催: {event?.host ?? '—'}
               </AppText>
               <AppText variant="small" style={styles.cardMuted}>
                 ID: {eventId}
@@ -125,16 +153,16 @@ export const AdminPrintScreen: React.FC = () => {
                   </AppText>
                 )}
               </View>
-              {browseQrUrl ? (
+              {scanUrl ? (
                 <AppText variant="small" style={[styles.cardMuted, styles.qrUrl]} selectable>
-                  {browseQrUrl}
+                  {scanUrl}
                 </AppText>
               ) : null}
               <AppText variant="small" style={styles.cardMuted}>
-                参加用QR（Phantom内ブラウザで開く・Android推奨）
+                参加用QR（通常のブラウザで開く）
               </AppText>
               <AppText variant="caption" style={styles.cardMuted}>
-                上記URLをQRコード化して印刷してください。生徒はPhantomでスキャンするとアプリ内ブラウザで開きます。
+                上記URLをQRコード化して印刷してください。生徒は通常ブラウザで開けます。署名が必要な場合は確認画面で「Phantomで開く」を利用してください。
               </AppText>
             </Card>
 

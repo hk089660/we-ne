@@ -9,15 +9,18 @@ export interface SchoolEvent {
   datetime: string;
   host: string;
   state?: 'draft' | 'published' | 'ended';
+  /** 参加済み数（管理者用・API が返す） */
+  claimedCount?: number;
 }
 
-/** エラー種別（ロジック側で判別） */
+/** エラー種別（HTTP契約・UI分岐は code のみで行う） */
 export type SchoolClaimErrorCode =
-  | 'invalid'       // eventId 不正
-  | 'not_found'     // イベントが見つからない
-  | 'eligibility'   // 参加資格なし（event.state が published 以外等）
-  | 'retryable'     // ネットワーク等、再試行可能
-  | 'user_cancel';  // Phantom署名キャンセル
+  | 'invalid'           // eventId 不正
+  | 'not_found'        // イベントが見つからない
+  | 'eligibility'      // 参加資格なし（event.state が published 以外等）
+  | 'retryable'        // ネットワーク等、再試行可能
+  | 'user_cancel'      // Phantom署名キャンセル
+  | 'wallet_required'; // Phantom接続が必要（Phantom誘導ボタン用）
 
 export interface SchoolClaimErrorInfo {
   code: SchoolClaimErrorCode;

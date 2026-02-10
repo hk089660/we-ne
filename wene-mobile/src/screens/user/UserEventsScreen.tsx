@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -8,15 +8,32 @@ import { theme } from '../../ui/theme';
 import { getParticipations } from '../../data/participationStore';
 import { useRecipientTicketStore } from '../../store/recipientTicketStore';
 import { getClaimMode } from '../../config/claimMode';
-import { getAllSchoolEvents } from '../../api/schoolEvents';
+import { getSchoolDeps } from '../../api/createSchoolDeps';
 import { schoolRoutes } from '../../lib/schoolRoutes';
+import type { SchoolEvent } from '../../types/school';
 
 export const UserEventsScreen: React.FC = () => {
   const router = useRouter();
   const [startedIds, setStartedIds] = useState<string[]>([]);
   const [completedIds, setCompletedIds] = useState<string[]>([]);
+  const [events, setEvents] = useState<SchoolEvent[]>([]);
   const { tickets, loadTickets, isJoined } = useRecipientTicketStore();
   const isSchoolMode = getClaimMode() === 'school';
+
+  useEffect(() => {
+    let cancelled = false;
+    getSchoolDeps()
+      .eventProvider.getAll()
+      .then((items) => {
+        if (!cancelled) setEvents(items);
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadParticipations = useCallback(async () => {
     if (isSchoolMode) {
@@ -34,8 +51,6 @@ export const UserEventsScreen: React.FC = () => {
       loadParticipations().catch(() => {});
     }, [loadParticipations])
   );
-
-  const events = getAllSchoolEvents();
   const pendingEvents = events.filter(
     (event) => startedIds.includes(event.id) && !(isSchoolMode && isJoined(event.id))
   );

@@ -1,16 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { AppText, Button, CategoryTabs, CountBadge, EventRow, AdminShell, StatusBadge } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getMockAdminRole, setMockAdminRole, mockCategories, mockEvents } from '../../data/adminMock';
+import { getMockAdminRole, setMockAdminRole, mockCategories } from '../../data/adminMock';
+import { getSchoolDeps } from '../../api/createSchoolDeps';
+import type { SchoolEvent } from '../../types/school';
 
 export const AdminEventsScreen: React.FC = () => {
   const router = useRouter();
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [role, setRole] = useState(getMockAdminRole());
+  const [events, setEvents] = useState<SchoolEvent[]>([]);
   const canManageCategories = role === 'admin';
   const canCreateEvent = role === 'admin' || role === 'operator';
+
+  useEffect(() => {
+    let cancelled = false;
+    getSchoolDeps()
+      .eventProvider.getAll()
+      .then((items) => {
+        if (!cancelled) setEvents(items);
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <AdminShell
@@ -50,7 +68,7 @@ export const AdminEventsScreen: React.FC = () => {
         />
 
         <View style={styles.list}>
-          {mockEvents.map((event) => (
+          {events.map((event) => (
             <EventRow
               key={event.id}
               title={event.title}
@@ -58,12 +76,12 @@ export const AdminEventsScreen: React.FC = () => {
               host={event.host}
               leftSlot={
                 <CountBadge
-                  value={event.rtCount}
+                  value={event.claimedCount ?? 0}
                   backgroundColor={adminTheme.colors.muted}
                   textColor={adminTheme.colors.textSecondary}
                 />
               }
-              rightSlot={<StatusBadge state={event.state} />}
+              rightSlot={<StatusBadge state={event.state ?? 'draft'} />}
               onPress={() => router.push(`/admin/events/${event.id}` as any)}
               style={styles.row}
             />

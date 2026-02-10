@@ -29,8 +29,8 @@ async function getDeviceId(storage: { getItem: (k: string) => Promise<string | n
 
 export function createMockSchoolClaimClient(eventProvider: SchoolEventProvider): SchoolClaimClient {
   return {
-    async submit(eventId: string): Promise<SchoolClaimResult> {
-      const event = eventProvider.getById(eventId);
+    async submit(eventId: string, _options?: import('./schoolClaimClient').SchoolClaimSubmitOptions): Promise<SchoolClaimResult> {
+      const event = await eventProvider.getById(eventId);
       if (!event) {
         return {
           success: false,

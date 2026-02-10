@@ -1,319 +1,211 @@
-# We-ne Mobile
+# We-ne（we-ne）— Solana上の「非保管型・透明な支援配布」PoC
 
-[English README](./README.md)
+**We-ne** は、Solana上で動作する **非保管型（non-custodial）** の支援配布 / バウチャー配布の **PoC（v0）** です。
+「支援があるのに、届くまでが遅い」「不正や二重受給を防ぎたい」「ただし個人情報は出したくない」——そういった **“公共支援っぽい”** ユースケースを想定して設計しています。
 
-React Native（Expo + TypeScript）アプリ - 受給者向けUI
+> ✅ 現在の状態：PoC / v0（レビュー用）
+> ✅ クラスタ：**devnet固定**（安全のため）
+> ⚠️ 本番運用は想定していません（監査未実施）
 
-## セットアップ
+---
+
+## One-liner
+
+**SPLトークンの支援配布を、一定期間のクレーム（claim）として提供し、二重受給はオンチェーンのReceiptで防止。
+受給者はPhantomで署名し、支給は数秒で完了。すべてオンチェーンで監査可能。**
+
+---
+
+## 何を作っているか（概要）
+
+We-ne は以下を満たす「支援配布の基本プリミティブ」を提供します。
+
+* **非保管型**：鍵は受給者のPhantomにあり、サーバが資産を預からない
+* **透明性**：支給（claim）はオンチェーンで追跡可能
+* **高速/低コスト**：Solanaの特性で、即時性と手数料の低さを活かす
+* **二重受給の防止**：オンチェーンの `ClaimReceipt PDA` で **同一期間の重複claimを拒否**
+* **運用の現実性**：学校/コミュニティの現場で回る「QR→参加→確認」動線をPoCとして実装
+
+---
+
+## PoCで今できること（デモフロー）
+
+### ✅ School Participation Ticket（学校イベント参加チケット）
+
+「参加証明（チケット）をその場で発行し、集計できる」ことを想定したデモです。
+
+1. イベント会場で **QR** をスキャン
+2. イベント詳細を確認
+3. **Participate / Claim**
+4. Phantomで署名 → 送信
+5. 参加チケット（オンチェーンの記録＋受領）が作成される
+
+> チケットは譲渡不能想定 / 金銭価値なしの参加証明PoC
+> 個人情報（氏名・学籍番号など）を外部に露出しない運用を優先
+
+---
+
+## すでにある実装（PoCの現状）
+
+* Solana devnet 上での **claimフロー**（Receipt発行による二重claim防止）
+* 学校参加チケットの **エンドツーエンド動線**（QR→確認→claim→成功）
+* **プログラムロジックとUI/クライアント**の分離（将来の差し替え/強化を前提）
+
+---
+
+## 最近のアップデート（安定性 / 運用性）
+
+### Stability Improvements
+
+* 参加状態の追跡（started / completed）で「未完了/完了」表示の精度を改善
+* CSS print（`@media print`）による **印刷向けQRレイアウト**（現場でのバックアップ運用を想定）
+* 共有端末向けの **ロール制限（viewer / operator / admin）**
+* 開発用ロール切替（本番では非表示）
+
+### School Participation Flow Refactor
+
+* API層の抽象化：`SchoolClaimClient` / `SchoolEventProvider` で mock⇄本番差し替えを容易に
+* HookでUI/ロジック分離：`useSchoolClaim` が状態遷移（idle/loading/success/already/error）を集約
+* エラー表現の統一：`SchoolClaimResult` / `SchoolClaimErrorCode` による分岐
+* eventIdの一元化：`parseEventId` / `useEventIdFromParams`
+* ルーティング統一：`schoolRoutes`（home/events/scan/confirm/success/schoolClaim）
+* already時のUX統一：alreadyJoinedもsuccessに遷移して一貫性
+* リトライ導線：retryableエラーは「Retry」表示
+
+→ 詳細：`wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+
+---
+
+## Phantom / QR運用に関する重要メモ（PoC）
+
+### devnet固定
+
+* Phantomはクラスタ整合性（devnet/testnet/mainnet）を厳密にチェックします
+* deeplink / RPC は **devnetに明示的に合わせる必要**があります
+
+### Androidの戻り不安定問題（PoCの設計判断）
+
+Androidでは「Phantom → ブラウザに戻る」が不安定なケースがあるため、PoCでは以下を推奨しています。
+
+* 学生の主要動線は **Phantom in-app browser** を想定
+* `/admin/print/:eventId` で生成するURLをQRとして印刷し、**Phantom内で開く**運用を基本にする
+* Redirect-based connect は主要動線にしない（`/phantom-callback` はリカバリ用）
+
+推奨ブラウザ：Safari（iOS） / Chrome（Android）
+
+---
+
+## リポジトリ構成
+
+```
+we-ne/
+├── grant_program/           # Solana smart contract (Anchor)
+│   ├── programs/grant_program/src/lib.rs
+│   └── tests/
+│
+├── wene-mobile/             # Mobile app (React Native + Expo)
+│   ├── app/                 # Screens (Expo Router)
+│   ├── src/solana/          # Blockchain client
+│   ├── src/wallet/          # Phantom adapter
+│   └── src/utils/phantom.ts
+│
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── SECURITY.md
+│   ├── PHANTOM_FLOW.md
+│   ├── DEVELOPMENT.md
+│   └── ROADMAP.md
+│
+├── scripts/                 # build helper
+├── .github/workflows/       # CI
+└── ...
+```
+
+---
+
+## クイックスタート（第三者が再現できることを重視）
+
+### 前提
+
+* Node.js v18+（推奨：v20 LTS）
+* コントラクト：Rust / Solana CLI v1.18+ / Anchor v0.30+
+* モバイル：Android SDK（API 36）/ Java 17
+
+### ルートからのワンコマンド build/test
+
+**Option A（npm）**
 
 ```bash
-# 依存関係のインストール
+git clone https://github.com/hk089660/instant-grant-core.git
+cd instant-grant-core
+
 npm install
-
-# アプリの起動
-npm start
+npm run build
+npm run test
 ```
 
-## ディレクトリ構成
-
-```
-wene-mobile/
-├── app/
-│   ├── _layout.tsx          # ルートレイアウト（Stack、header非表示）
-│   ├── index.tsx            # 受給者ホーム画面
-│   ├── phantom/
-│   │   └── [action].tsx     # Phantom ウォレットリダイレクトハンドラー
-│   └── r/
-│       └── [campaignId].tsx # 受給画面
-├── assets/
-│   ├── icon.png             # アプリアイコン（1024x1024）
-│   ├── adaptive-icon.png    # Android アダプティブアイコン
-│   ├── splash.png           # スプラッシュ画面画像
-│   └── icon-source.png      # アイコン生成用のソース画像
-├── scripts/
-│   ├── generate-icons.js    # アイコン生成スクリプト
-│   └── deploy-via-adb.sh    # ADB デプロイスクリプト
-├── app.config.ts            # Expo設定（deeplink含む）
-├── package.json
-└── tsconfig.json
-```
-
-## Deeplink
-
-### Custom Scheme
-- Scheme: `wene`
-- 形式: `wene://r/<campaignId>?code=...`
-- 例: `wene://r/demo-campaign?code=demo-invite`
-
-### Universal Links / App Links (HTTPS)
-- URL: `https://wene.app/r/<campaignId>?code=...`
-- 例: `https://wene.app/r/demo-campaign?code=demo-invite`
-- iOS: Universal Links（associatedDomains設定済み）
-- Android: App Links（intentFilters設定済み）
-
-## Universal Links / App Links の設定
-
-### iOS: Apple App Site Association (AASA)
-
-**必要な理由:**
-iOSでUniversal Linksを動作させるには、ドメイン（wene.app）のルートにAASAファイルを配置する必要があります。iOSがこのファイルを検証して、アプリがそのドメインのリンクを処理できることを確認します。
-
-**配置場所:**
-- `https://wene.app/.well-known/apple-app-site-association`
-- HTTPSでアクセス可能である必要があります
-- Content-Type: `application/json` で配信する必要があります
-
-**必要な値:**
-```json
-{
-  "applinks": {
-    "apps": [],
-    "details": [
-      {
-        "appID": "TEAM_ID.jp.wene.app",
-        "paths": ["/r/*"]
-      }
-    ]
-  }
-}
-```
-- `TEAM_ID`: Apple DeveloperアカウントのTeam ID（10文字の英数字）
-- `paths`: アプリで処理するパスパターン（`/r/*`で/r/で始まるすべてのパスを処理）
-
-### Android: Digital Asset Links (assetlinks.json)
-
-**必要な理由:**
-AndroidでApp Linksを動作させるには、ドメイン（wene.app）のルートにassetlinks.jsonファイルを配置する必要があります。Androidがこのファイルを検証して、アプリがそのドメインのリンクを処理できることを確認します。
-
-**配置場所:**
-- `https://wene.app/.well-known/assetlinks.json`
-- HTTPSでアクセス可能である必要があります
-- Content-Type: `application/json` で配信する必要があります
-
-**必要な値:**
-```json
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "jp.wene.app",
-    "sha256_cert_fingerprints": [
-      "SHA256_FINGERPRINT"
-    ]
-  }
-}]
-```
-- `package_name`: app.config.tsで設定した`jp.wene.app`
-- `sha256_cert_fingerprints`: アプリの署名証明書のSHA256フィンガープリント（リリースビルド用とデバッグビルド用の両方を設定可能）
-
-**フィンガープリントの取得方法:**
-```bash
-# リリースキーストアの場合
-keytool -list -v -keystore your-release-key.keystore -alias your-key-alias
-
-# デバッグキーストアの場合
-keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
-```
-
-**注意事項:**
-- AASAとassetlinks.jsonは、HTTPSで配信され、正しいContent-Typeヘッダーが必要です
-- ファイルはリダイレクトなしで直接アクセス可能である必要があります
-- iOSはAASAファイルをキャッシュするため、変更後は反映に時間がかかる場合があります
-- AndroidはApp Linksの検証を実行時に行うため、初回起動時にインターネット接続が必要です
-
-## 画面仕様
-
-### ホーム画面（app/index.tsx）
-- 白背景
-- タイトル「We-ne」
-- 説明文「支援クレジットを受け取る」
-- デモリンクボタン
-
-### 受給画面（app/r/[campaignId].tsx）
-- URLパラメータから `campaignId` と `code` を取得
-- カード形式で情報を表示
-- 「受け取る」ボタン
-
-## デザインルール
-
-- 白黒＋グレーのみ
-- 影は使わない
-- 角丸はやや大きめ（16px）
-- 1画面1アクション
-
-## アプリアイコン
-
-### カスタムアイコンの設定
-
-1. アイコン画像を `assets/icon-source.png` として保存（1024x1024推奨）
-2. アイコン生成スクリプトを実行:
-```bash
-npm run generate-icons
-```
-
-生成されるファイル:
-- `icon.png` - メインアプリアイコン
-- `adaptive-icon.png` - Android アダプティブアイコン
-- `favicon.png` - Web ファビコン
-- `splash.png` - スプラッシュ画面画像
-
-### ADB経由でデバイスにデプロイ
+**Option B（script）**
 
 ```bash
-npm run deploy:adb
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all
 ```
 
-**DEV メモ**: Android 実機では claim フローがクラッシュせず動作する（成功 or 再試行に到達）。@coral-xyz/anchor の Wallet は RN で undefined になるため、自前の `KeypairWallet` を使用している。詳細は `docs/ANDROID_APK_DEPLOY_STEPS.md` 参照。
-
-このスクリプトは以下を実行:
-1. `icon-source.png` からアイコンを生成
-2. prebuild実行（アイコンをAndroidリソースに反映）
-3. APKをビルド
-4. ADB経由で接続デバイスにインストール
-
-## APK の書き出し
-
-### 前提条件
-
-- **Java 17**: Gradle 8 は Java 25 非対応のため、Java 17 を使用してください。
-  - macOS (Homebrew): `brew install openjdk@17`
-- **Android SDK**: `platform-tools`, `platforms;android-36`, `build-tools;36.0.0` が必要です。
-  - macOS (Homebrew): `brew install --cask android-commandlinetools` ののち、`sdkmanager` で上記をインストール。
-- 未導入時は `ANDROID_HOME` と `JAVA_HOME` をそれぞれ設定してください。
-
-### 手順
+#### ローカル検証（型/ビルド）
 
 ```bash
-# 1. 初回のみ: ネイティブ Android プロジェクトを生成
-npm run build:prebuild
-
-# 2. APK をビルド（Java 17 と Android SDK を使用）
-npm run build:apk
+npm run build
+cd wene-mobile && npx tsc --noEmit
 ```
 
-出力先: `android/app/build/outputs/apk/release/app-release.apk`
+---
 
-Homebrew で Java 17 と Android コマンドラインツールを入れている場合は、そのまま `npm run build:apk` でビルドできます。別のパスを使う場合は、ビルド前に `JAVA_HOME` と `ANDROID_HOME` を設定してください。
+## 成功条件（レビューで確認できること）
 
-### ターミナルが落ちる／ビルドを再試行したい場合
+| Step  | Result                                          |
+| ----- | ----------------------------------------------- |
+| build | `anchor build` が通る / mobileの `tsc --noEmit` が通る |
+| test  | Anchor tests が通る（例：期間内1回のみclaimできる）             |
+| demo  | QR→確認→claim→成功 の動線が破綻しない                        |
 
-**新しいターミナル**を開き、以下を実行してください。
+---
 
-```bash
-cd wene-mobile
-./scripts/build-apk.sh
-# または
-npm run build:apk
-```
+## セキュリティモデル（PoC）
 
-### APK インストール時の注意点
+| Aspect         | Implementation                     |
+| -------------- | ---------------------------------- |
+| Key custody    | 非保管型（鍵はPhantom内）                   |
+| Session tokens | NaCl boxで暗号化し、アプリサンドボックスに保存        |
+| Double-claim   | `ClaimReceipt PDA` で期間内の二重claimを拒否 |
+| Deep links     | 暗号化ペイロード / URL validation          |
 
-**更新が反映されない場合:**
+⚠️ **監査未実施（NOT AUDITED）**：テスト用途のみ
+→ 詳細：`docs/SECURITY.md`
 
-1. **既存のアプリをアンインストール**
-   - 設定 > アプリ > wene-mobile（または jp.wene.app）> アンインストール
-   - または `adb uninstall jp.wene.app`（USB接続時）
+---
 
-2. **新しいAPKをインストール**
-   - ファイルマネージャーでAPKを開く
-   - または `adb install android/app/build/outputs/apk/release/app-release.apk`
+## 今後のマイルストーン（PoC→パイロット準備）
 
-**理由:**
-- `versionCode` が同じ場合、Androidは更新と認識しません
-- 異なる署名（例：Expo Go経由でインストール）の場合、上書きインストールできません
-- `app.config.ts` で `versionCode` を自動更新するように設定済みですが、既存のアプリが古い `versionCode` の場合はアンインストールが必要です
+* Eligibility gating / abuse resistance（しきい値/スコア/審査フックなど）
+* テスト/CI/デプロイの強化、rate limitやanti-spam
+* レビュー向け「評価キット」（再現スクリプト・デモガイド・デプロイノート）
+* 小規模パイロット（コミュニティ/学校的環境）に向けた導入テンプレ/ドキュメント
 
-## iOS ローカルビルド（Simulator）
+---
 
-### 前提条件
+## ライセンス / 貢献
 
-- **Xcodeアプリ**がインストールされている必要があります（App Storeからインストール、約12GB）
-- Command Line Toolsだけでは不十分です
-- インストール後: `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` を実行
+* License：MIT
+* Contributing：`CONTRIBUTING.md`
+* Security：`SECURITY.md`
 
-**確認方法:**
-```bash
-xcode-select -p
-# 正しい場合: /Applications/Xcode.app/Contents/Developer
-# 間違っている場合: /Library/Developer/CommandLineTools（Xcodeアプリが必要）
-```
+---
 
-### ローカルビルド手順
+## 連絡先
 
-```bash
-cd wene-mobile
-./scripts/build-ios.sh
-# または
-npm run build:ios
-```
+* Issues：GitHub Issues
+* Security：`SECURITY.md` に記載の手順に従ってください
 
-- 初回は `expo prebuild --platform ios --clean` 相当の処理が走ります（`ios/` がない場合）。
-- その後 `expo run:ios` で Simulator にビルド・起動します。
+---
 
-**ターミナルが落ちる／再試行したい場合:** 新しいターミナルを開き、上記コマンドを再実行してください。
-
-### Xcodeがインストールされていない場合
-
-**EAS Build（クラウドビルド）を使用:**
-```bash
-# 1. EAS CLIのインストールとログイン
-npm install -g eas-cli
-eas login
-
-# 2. EASプロジェクトの初期化（初回のみ）
-eas init
-
-# 3. iOS Simulator用ビルド
-eas build --platform ios --profile development
-```
-
-詳細は `DEBUG_REPORT.md` の「iOS Simulator対応」セクションを参照してください。
-
-## トラブルシューティング
-
-### Expo GoでAndroid上に更新が反映されない場合
-
-以下の手順を順番に試してください：
-
-#### 方法1: キャッシュをクリア（推奨）
-```bash
-npm run start:clear
-# または
-npm run android:clear
-```
-
-#### 方法2: 完全リセット（方法1で解決しない場合）
-```bash
-npm run start:reset
-# または
-npm run android:reset
-```
-
-#### 方法3: すべてのキャッシュを削除（方法2で解決しない場合）
-```bash
-npm run clean
-```
-
-その後、Androidデバイスで：
-1. **Expo Goアプリを完全に閉じる**
-   - 最近使用したアプリ一覧からExpo Goをスワイプして閉じる
-   - または、設定 > アプリ > Expo Go > 強制停止
-
-2. **Expo Goアプリを再起動**
-   - アプリを開き直し、QRコードをスキャンして再接続
-
-3. **手動でリロード**
-   - Expo Goアプリ内で、デバイスをシェイクするか、メニューから「Reload」を選択
-
-#### 方法4: ネットワーク接続を確認
-- Androidデバイスと開発マシンが同じWi-Fiネットワークに接続されていることを確認
-- ファイアウォールやVPNが開発サーバーへの接続をブロックしていないか確認
-- USBデバッグ経由で接続する場合：`adb reverse tcp:8081 tcp:8081` を実行
-
-#### 方法5: 開発サーバーのログを確認
-- 開発サーバーのターミナルでエラーメッセージがないか確認
-- AndroidデバイスでExpo Goアプリのログを確認（設定 > デバッグ > ログを表示）
-
-#### 補足情報
-- `app.config.ts`は開発時に自動的にバージョンが更新されるため、手動で変更する必要はありません
-- それでも更新されない場合は、Expo Goアプリ自体を再インストールしてみてください
+Built for public-good style distribution on Solana.

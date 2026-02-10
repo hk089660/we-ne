@@ -1,17 +1,44 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AppText, Button, Card, AdminShell } from '../../ui/components';
 import { adminTheme } from '../../ui/adminTheme';
-import { getMockAdminRole, setMockAdminRole, mockEvents, mockParticipants } from '../../data/adminMock';
+import { getMockAdminRole, setMockAdminRole, mockParticipants } from '../../data/adminMock';
+import { getSchoolDeps } from '../../api/createSchoolDeps';
+import type { SchoolEvent } from '../../types/school';
 
 export const AdminEventDetailScreen: React.FC = () => {
   const router = useRouter();
   const { eventId } = useLocalSearchParams<{ eventId: string }>();
-  const [role, setRole] = React.useState(getMockAdminRole());
+  const [role, setRole] = useState(getMockAdminRole());
+  const [event, setEvent] = useState<SchoolEvent | null>(null);
   const canPrint = role === 'admin';
   const canDownloadCsv = role === 'admin';
-  const event = mockEvents.find((item) => item.id === eventId) ?? mockEvents[0];
+
+  useEffect(() => {
+    if (!eventId) return;
+    let cancelled = false;
+    getSchoolDeps()
+      .eventProvider.getById(eventId)
+      .then((ev) => {
+        if (!cancelled) setEvent(ev ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setEvent(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+
+  const displayEvent: SchoolEvent = event ?? {
+    id: eventId ?? '',
+    title: '…',
+    datetime: '',
+    host: '',
+    state: undefined,
+    claimedCount: undefined,
+  };
 
   return (
     <AdminShell
@@ -32,37 +59,29 @@ export const AdminEventDetailScreen: React.FC = () => {
 
         <Card style={styles.card}>
           <AppText variant="h3" style={styles.cardText}>
-            {event.title}
+            {displayEvent.title}
           </AppText>
           <AppText variant="caption" style={styles.cardText}>
-            {event.datetime}
+            {displayEvent.datetime}
           </AppText>
           <AppText variant="caption" style={styles.cardText}>
-            主催: {event.host}
+            主催: {displayEvent.host}
           </AppText>
           <AppText variant="small" style={styles.cardMuted}>
-            ID: {event.id}
+            ID: {displayEvent.id}
           </AppText>
           <AppText variant="small" style={styles.cardMuted}>
-            状態: {event.state}
+            状態: {displayEvent.state ?? '—'}
           </AppText>
         </Card>
 
         <View style={styles.counts}>
           <Card style={styles.countCard}>
             <AppText variant="caption" style={styles.cardText}>
-              リアルタイム参加数
+              参加済み数
             </AppText>
             <AppText variant="h2" style={styles.cardText}>
-              {event.rtCount}
-            </AppText>
-          </Card>
-          <Card style={styles.countCard}>
-            <AppText variant="caption" style={styles.cardText}>
-              total参加数
-            </AppText>
-            <AppText variant="h2" style={styles.cardText}>
-              {event.totalCount}
+              {displayEvent.claimedCount ?? '—'}
             </AppText>
           </Card>
         </View>
@@ -82,7 +101,7 @@ export const AdminEventDetailScreen: React.FC = () => {
               <Button
                 title="印刷用PDF"
                 variant="secondary"
-                onPress={() => router.push(`/admin/print/${eventId}` as any)}
+                onPress={() => eventId && router.push(`/admin/print/${eventId}` as any)}
                 style={styles.secondaryButton}
               />
             ) : null}

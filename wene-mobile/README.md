@@ -1,431 +1,619 @@
-# We-ne Mobile
+# we-ne (instant-grant-core)
 
-[日本語版 README はこちら](./README.ja.md)
+**Solana-based instant grant / benefit distribution PoC**
+Non-custodial, transparent, and auditable distribution flows for public-support style use cases.
 
-Recipient-facing UI built with React Native (Expo + TypeScript)
+> **Project Status:** This project is currently under **Superteam Japan Grants** review.
+> It is in a **PoC / v0** phase, focused on the demo flow described below.
 
-## Quick Start
+---
+
+## Recent Updates (Stability Improvements)
+
+* Introduced participation state tracking (**started / completed**) to ensure accurate "incomplete / completed" views for users
+* Added **print-friendly QR layout** using CSS print (`@media print`) for reliable offline and backup operations
+* Implemented **role-based UI restrictions** (viewer / operator / admin) to improve safety on shared school devices
+* Added a development-only role switcher for faster testing and demos (**not visible in production**)
+
+These updates focus on stability, operational safety, and real-world school usage.
+
+---
+
+## Recent Updates (School Participation Flow Refactor)
+
+School participation flow logic, types, and error handling have been restructured for clarity and easy replacement.
+
+* **API layer abstraction:** `SchoolClaimClient` / `SchoolEventProvider` interfaces separate mock from production; swapping to a fetch-based implementation is straightforward.
+* **UI/logic separation via Hook:** `useSchoolClaim` centralizes `idle/loading/success/already/error` states; screens depend only on `state` and `handleClaim`.
+* **Unified error representation:** `SchoolClaimResult` (`Success | Failure`), `SchoolClaimErrorCode` (`retryable / invalid_input / not_found`) enable clear logic-side branching. `errorInfo / isRetryable` identify retryable errors.
+* **eventId centralization:** `parseEventId / useEventIdFromParams` consolidate query/route parsing and validation; invalid `eventId` redirects to `/u`.
+* **Unified routing:** `schoolRoutes` constants for `home/events/scan/confirm/success/schoolClaim`.
+* **Unified already-handling:** Already-joined (`alreadyJoined`) also navigates to success screen for consistent UX.
+* **Retry flow:** Button label changes to `"Retry"` for retryable errors.
+
+→ Details: **School Participation Flow (Architecture)** and `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+
+---
+
+## Project Status: Claim flow verified on Android (2025)
+
+Claim flow is fully verified on Android (APK) with Phantom wallet:
+
+`connect → sign → send → confirm → token receipt`
+
+Phantom strictly validates cluster consistency (**devnet / testnet / mainnet**). If the transaction is interpreted as mainnet, Phantom may block signing with a warning.
+
+* Deep links and RPC endpoints must explicitly match the target cluster
+  (e.g. `cluster=devnet` in redirect URLs and **devnet RPC only**).
+* The current PoC is fixed to **devnet** for safety; all RPC and Phantom deeplinks use devnet.
+
+---
+
+## What works today (Demo Flow)
+
+* Scan event QR code
+* View event details
+* Claim a digital participation ticket
+* Ticket is stored and viewable in the app
+
+---
+
+## School Participation Flow (Architecture)
+
+### Flow
+
+* Home → "Start participation" → Event list (`/u`)
+* "Participate" → Scan (`/u/scan`)
+* "Start scan" → Confirm (`/u/confirm?eventId=evt-001`)
+* "Participate" → Claim API → Success (`/u/success?eventId=evt-001`)
+* "Done" → Back to list
+
+### Key concepts
+
+| Concept                | Description                                                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `SchoolClaimClient`    | Interface for the claim API client. Mock can be replaced with a fetch-based implementation                                          |
+| `useSchoolClaim`       | Hook encapsulating claim logic. Exposes status (`idle/loading/success/already/error`), `handleClaim`, `onSuccess`                   |
+| `SchoolClaimResult`    | Discriminated union: success `{ success: true, eventName, alreadyJoined? }`, failure `{ success: false, error: { code, message } }` |
+| `useEventIdFromParams` | Parses and validates `eventId` from query/route. `redirectOnInvalid: true` replaces to `/u` when invalid                            |
+| `schoolRoutes`         | Route constants: `home/events/scan/confirm/success/schoolClaim`                                                                     |
+
+### Mock cases (for testing)
+
+* `evt-001`: Success
+* `evt-002`: Already joined (`alreadyJoined`) → navigates to success screen
+* `evt-003`: Retryable error → "Retry" to re-claim
+
+### Verification (static)
+
+* TypeScript: `npx tsc --noEmit` ✅
+* `useSchoolClaim` state transitions ✅
+* Routing consistency (`eventId` unified via `useEventIdFromParams`) ✅
+
+For future fetch implementation: map HTTP errors to Result (`404→not_found`, `5xx/network→retryable`)
+
+→ Details:
+
+* `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+* `docs/DEVELOPMENT.md`
+* `wene-mobile/docs/EMULATOR_DEVELOPMENT.md`
+
+---
+
+## First Target Use Case: School Event Participation Ticket
+
+The first concrete use case of We-ne is a digital participation ticket for school events and volunteer activities.
+
+* Students scan a QR code at the event venue
+* A non-transferable digital participation ticket is issued instantly
+* No monetary value or exchangeability
+* Personal information (name, student number) is not exposed externally
+* Event organizers can verify participation counts via an admin interface
+
+This use case prioritizes speed, usability, and privacy, making it suitable for real educational environments.
+
+---
+
+## Distribution (School PoC)
+
+* **Students:** native app
+
+  * Android: APK distribution (EAS Build or local build; no Play Store)
+  * iOS: TestFlight (planned; EAS Build → IPA → App Store Connect)
+* **Web:** Admin & support use only (`/admin/*`)
+  Not used for student claim flow; student participation is app-only.
+
+The Expo app is the primary flow for Phantom stability; Web/PWA is not used for the main claim flow.
+
+---
+
+## Deliverables (PoC)
+
+1. **Devnet claim flow on Android with Phantom** (devnet-only)
+
+   * Verified: demo video and steps in `DEVNET_SETUP.md`
+
+2. **Reproducible build/test from repo root**
+
+   * Verified: `npm run build` and `npm run test` (or `scripts/build-all.sh build/test`) succeed in the supported environment
+   * Verified: CI and `DEVELOPMENT.md`
+
+3. **School participation UI flow with mock claim states**
+
+   * Verified: `/u → /u/scan → /u/confirm → /u/success` and mock cases `evt-001/002/003` behave as specified
+   * Verified: `STATIC_VERIFICATION_REPORT.md`
+
+4. **Print-ready QR and role-restricted admin UI for school devices**
+
+   * Verified: `/admin/print/:eventId` renders CSS print layout and viewer/operator/admin restrictions are enforced
+   * Verified: manual check in app and print preview
+
+---
+
+## Next Milestones (PoC)
+
+* Simplify Scan → Confirm → Success flow
+
+  * Verified by: updated demo video and flow section
+* Basic admin dashboard (issued / completed counts)
+
+  * Verified by: local run of `wene-mobile/server` and a short demo
+* Short demo video (1–2 minutes)
+
+  * Verified by: link in README
+
+---
+
+## Abuse Prevention & Eligibility (PoC)
+
+* Implemented: on-chain double-claim prevention per period using `ClaimReceipt` PDA
+* Not implemented: allowlist/Merkle eligibility, FairScale reputation, and production-grade identity checks
+* School PoC: optional join-token on the school server can gate participation, but it is not a strong identity system and is out-of-scope for production security
+
+---
+
+## Operational Constraints (QR + Phantom) (PoC)
+
+* Devnet-only; cluster mismatch is blocked by Phantom
+* Android: “Phantom → back to browser” is unreliable
+
+  * v0 uses Phantom browse deeplink
+    `https://phantom.app/ul/browse/<url>?ref=<ref>`
+  * Print the URL shown on the admin print screen (`/admin/print/:eventId`) as a QR code so students open the app inside Phantom
+* Redirect-based connect (browser → Phantom → redirect back) is not the primary flow in v0 due to instability
+
+  * `/phantom-callback` exists only for manual recovery
+
+Recommended browsers for `/u/*`: Safari (iOS) / Chrome (Android). Other browsers may be unstable.
+
+---
+
+## School Admin & Off-chain Data Integrity (PoC)
+
+* Admin views and counts are derived from the school API server and its JSON persistence (demo-suitable, not tamper-evident)
+* Participation records are not cryptographically signed or independently verifiable in this PoC
+* Operational assumption: controlled distribution of QR codes and trusted local operators during the school event
+
+---
+
+## Instant, transparent benefit distribution on Solana — built for Japan's public support needs
+
+[![CI](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml/badge.svg)](https://github.com/hk089660/-instant-grant-core/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/hk089660/instant-grant-core/blob/main/LICENSE)
+
+**Links:**
+
+* 日本語版 README: `README.ja.md`
+* Architecture: `docs/ARCHITECTURE.md`
+* Development Guide: `docs/DEVELOPMENT.md`
+* Static Verification Report: `wene-mobile/docs/STATIC_VERIFICATION_REPORT.md`
+* Emulator Development: `wene-mobile/docs/EMULATOR_DEVELOPMENT.md`
+
+---
+
+## Overview
+
+**日本語:**
+We-neは、Solana上で動作する非保管型の支援配布システムのPoCです。現在はプロトタイプ段階で、Phantom連携と基本的なclaimフローが動作しています。本PoCはdevnet固定で、本番利用は想定していません。不正・濫用対策はPoCで限定的で、オンチェーンの二重claim防止が中心です。FairScaleや許可リスト（Allowlist）の連携は計画段階で未実装です。
+
+**English:**
+We-ne is a non-custodial benefit distribution PoC built on Solana. It is prototype-stage with Phantom integration and a working basic claim flow. This PoC is devnet-only and not intended for production use. Abuse prevention is limited, centered on on-chain double-claim prevention. FairScale and allowlist-based eligibility are planned but not implemented.
+
+---
+
+## 🎯 What is we-ne?
+
+we-ne is a non-custodial benefit distribution system built on Solana, designed to deliver support payments instantly and transparently.
+
+**One-liner:** SPL token grants with periodic claims, double-claim prevention, and mobile wallet integration — all verifiable on-chain.
+
+---
+
+## Unified Balance List (Credits, Vouchers, and SPL Tokens)
+
+The app shows a single balance list that normalizes credits, vouchers, coupons, and SPL tokens into one `BalanceItem` model. Issuer and usability (e.g. “usable today”) are shown in the UI so users understand who issued the value and when they can use it.
+
+### What appears in the list
+
+* Demo Support Credits (off-chain)
+* Community / Event Vouchers (off-chain)
+* Merchant Coupons (off-chain)
+* SPL Tokens from the connected wallet (on-chain, Devnet)
+
+### Design concept
+
+The goal of this UI is not to expose blockchain assets as something special, but to normalize them as part of everyday usable balances. Users do not see “on-chain” vs “off-chain”; they see a list of balances they can use. Web3 is integrated into a life-style UI where the source of value (issuer) defines its meaning — whether it is a grant, a coupon, or a token.
+
+### UX rules (behavior)
+
+* Balances with expiration dates are prioritized
+* Items expiring sooner are shown first
+* “Usable Today” badges indicate immediate usability
+* SPL token balances are merged into the list only after wallet connection
+* Devnet fallback ensures at least one SPL row is always displayed when connected (fail-soft, demo-friendly)
+
+### Devnet / Demo note
+
+* SPL token balance is fetched from Devnet
+* If a specific mint is unavailable (e.g. not deployed on Devnet), the app safely falls back to any positive SPL balance in the wallet
+
+This fail-soft, demo-friendly behavior keeps demos stable and avoids blank or broken states during review.
+
+---
+
+## 🚨 Problem & Why It Matters
+
+### The Problem (Japan Context)
+
+In Japan, public support programs suffer from:
+
+* Slow delivery: weeks/months from application to receipt
+* High overhead: administrative costs eat into small grants
+* Opacity: hard to verify if funds reached intended recipients
+* Inflexibility: fixed schedules don’t match urgent needs
+
+### Global Relevance
+
+These problems exist worldwide:
+
+* Disaster relief that arrives too late
+* Micro-grants where fees exceed value
+* Aid programs lacking accountability
+
+---
+
+## Our Solution
+
+we-ne provides:
+
+* ⚡ Instant delivery: claims settle in seconds
+* 💰 Low cost: ~$0.001 per transaction
+* 🔍 Full transparency: every claim verifiable on-chain
+* 📱 Mobile-first: recipients claim via smartphone
+
+---
+
+## 🏗️ How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      HIGH-LEVEL FLOW                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   GRANTOR                 SOLANA                 RECIPIENT  │
+│   ───────                 ──────                 ─────────  │
+│                                                             │
+│   1. Create Grant ──────► Grant PDA                         │
+│   2. Fund Vault ────────► Token Vault                       │
+│                                                             │
+│                           ┌─────────┐                       │
+│                           │ Period  │◄──── 3. Open App      │
+│                           │ Check   │                       │
+│                           └────┬────┘                       │
+│                                │                            │
+│                           ┌────▼────┐                       │
+│                           │  Claim  │◄──── 4. Sign in       │
+│                           │ Receipt │      Phantom          │
+│                           └────┬────┘                       │
+│                                │                            │
+│                           ┌────▼────┐                       │
+│   5. Verify on Explorer ◄─┤ Tokens  ├────► Wallet           │
+│                           │Transfer │                       │
+│                           └─────────┘                       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+* Smart Contract (`grant_program/`): Anchor program managing grants, claims, and receipts
+* Mobile App (`wene-mobile/`): React Native app for recipients to claim benefits
+* Phantom Integration: Non-custodial signing via deep links
+
+### Recommended browsers
+
+Recommended browsers for student UI `/u/*` via QR: Safari (iPhone) / Chrome (Android). Phantom connect may be unstable on Firefox.
+
+**Android:** use Phantom in-app browser
+On Android, “Phantom → back to browser” can fail, so v0 uses Phantom browse deeplink as the main student QR content. Redirect-based connect is not the primary flow; `/phantom-callback` exists only for manual recovery.
+
+→ See `docs/ARCHITECTURE.md` for details
+
+---
+
+## 📱 Demo
+
+Demo video is posted on X (formerly Twitter):
+
+* 🎬 Demo video: [https://x.com/Shiki93278/status/2015659939356889450](https://x.com/Shiki93278/status/2015659939356889450)
+
+What the demo shows:
+
+* Opening the mobile app and connecting Phantom wallet
+* Scanning QR code or opening deep link (`wene://r/<campaignId>`)
+* Viewing grant details (amount, period, eligibility)
+* Tapping “Claim” → Phantom wallet signing the transaction
+* SPL tokens being transferred to recipient's wallet within seconds
+
+---
+
+## 🚀 Quickstart
+
+### Prerequisites
+
+* Node.js v18+ (recommended: v20 LTS)
+* For smart contract: Rust, Solana CLI v1.18+, Anchor v0.30+
+* For mobile: Android SDK (API 36), Java 17
+
+### One-command build (for contributors / third parties)
+
+From the repository root you can build and test everything without entering each subproject.
+
+**Option A: npm scripts (requires Node at root)**
 
 ```bash
-# One-command setup (recommended for new environments)
+git clone https://github.com/<owner>/we-ne.git
+cd we-ne
+
+npm install # optional: only if you want to run root scripts
+npm run build # build contract + mobile typecheck
+npm run test  # run Anchor tests
+```
+
+**Option B: shell script (no root Node required)**
+
+```bash
+chmod +x scripts/build-all.sh
+./scripts/build-all.sh all   # build + test contract + mobile typecheck
+./scripts/build-all.sh build # build only
+./scripts/build-all.sh test  # contract tests only
+```
+
+### Local verification (type/build)
+
+```bash
+# From repo root
+npm run build
+
+# Mobile only (TypeScript)
+cd wene-mobile && npx tsc --noEmit
+```
+
+**Upcoming:** Device/emulator verification will be done later (Android Emulator and Pixel 8 via USB are not available in current environment).
+UI final check on Pixel 8 (USB debugging) is planned after returning home.
+
+### What success looks like
+
+| Step                                   | Result                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------ |
+| `npm run build` / `build-all.sh build` | Contract builds with `anchor build`; mobile passes `npm install + tsc --noEmit`      |
+| `npm run test` / `build-all.sh test`   | Anchor tests (e.g. create_grant, fund_grant, claimer can claim once per period) pass |
+| `build-all.sh all`                     | All of the above; ends with “✅ Done.”                                                |
+
+---
+
+## Dependency note (mobile)
+
+The mobile app (`wene-mobile`) can hit npm peer dependency errors due to React/react-dom version mismatch.
+
+The repo uses:
+
+* `wene-mobile/.npmrc` (`legacy-peer-deps=true`)
+* `--legacy-peer-deps` in root scripts and CI
+
+For mobile-only setup, use:
+
+```bash
+npm install --legacy-peer-deps
+```
+
+See `docs/DEVELOPMENT.md` for per-component setup and recent changes for third-party builds.
+
+---
+
+## Run Mobile App (Development)
+
+```bash
+# From repo root (after cloning)
+cd wene-mobile
+
+# One-command setup (recommended)
 npm run setup
 
 # Or manual setup:
 npm install --legacy-peer-deps
+
 npm run doctor:fix
 npx expo prebuild --clean
+npm start
 ```
 
-## Available Scripts
+---
 
-| Command | Description |
-|---------|-------------|
-| `npm run setup` | Full environment setup (install + doctor + prebuild) |
-| `npm run doctor` | Check for common issues |
-| `npm run doctor:fix` | Auto-fix common issues |
-| `npm run build:apk` | Build Android APK |
-| `npm run deploy:adb` | Build and install via ADB |
-| `npm start` | Start Expo dev server |
-
-## Doctor Script
-
-The `doctor` script automatically detects and fixes common development issues, and protects the app's stable state:
+## Build Android APK
 
 ```bash
-# Check for issues
-npm run doctor
-
-# Auto-fix issues
-npm run doctor:fix
-```
-
-### 🔒 Locked Files Protection (完成形保護)
-
-Critical files are protected with MD5 hash verification. If these files are accidentally modified, doctor will immediately detect it:
-
-```
-🔒 assets/icon.png is intact
-🔒 assets/adaptive-icon.png is intact
-```
-
-If modified:
-```
-✗ assets/icon.png has been MODIFIED! (expected: b16d..., got: xxxx...)
-⚠ → This file should not be changed. Restore from backup or git.
-```
-
-### ✅ Required Patterns Check
-
-Ensures critical code patterns exist in key files:
-
-| File | Required Patterns |
-|------|-------------------|
-| `src/polyfills.ts` | `react-native-get-random-values`, `buffer` |
-| `src/utils/phantom.ts` | `bs58.encode`, `dappKeyBase58`, `handlePhantomConnectRedirect` |
-| `app/_layout.tsx` | `SafeAreaProvider`, `polyfills` |
-| All screens | `SafeAreaView` |
-
-### 🚫 Forbidden Patterns Check
-
-Detects and removes debug code (e.g., `/ingest/` fetch calls) from source files.
-
-### Other Checks
-
-- ✅ `node_modules` existence
-- ✅ Required dependencies (`react-native-get-random-values`, `buffer`, `bs58`, etc.)
-- ✅ Android `local.properties` configuration
-- ✅ App icon assets existence
-
-### Auto-fixable Issues
-
-| Issue | Fix |
-|-------|-----|
-| Missing dependencies | `npm install` |
-| Missing `local.properties` | Auto-detects Android SDK path |
-| Debug fetch calls | Removes agent debug logs |
-
-## Setup Script
-
-For new worktrees or clean builds:
-
-```bash
-npm run setup
-```
-
-**What it does:**
-1. `npm install --legacy-peer-deps`
-2. `npm run doctor --fix`
-3. `rm -rf android ios && npx expo prebuild --clean`
-4. Creates `android/local.properties` with detected SDK path
-
-## Directory Structure
-
-```
-wene-mobile/
-├── app/
-│   ├── _layout.tsx          # Root layout (Stack, hidden header)
-│   ├── index.tsx            # Recipient home screen
-│   ├── phantom/
-│   │   └── [action].tsx     # Phantom wallet redirect handler
-│   └── r/
-│       └── [campaignId].tsx # Claim screen
-├── assets/
-│   ├── icon.png             # App icon (1024x1024)
-│   ├── adaptive-icon.png    # Android adaptive icon
-│   ├── splash.png           # Splash screen image
-│   └── icon-source.png      # Source image for icon generation
-├── scripts/
-│   ├── doctor.js            # Issue detection and auto-fix
-│   ├── setup.sh             # Full environment setup
-│   ├── generate-icons.js    # Icon generation script
-│   └── deploy-via-adb.sh    # ADB deployment script
-├── app.config.ts            # Expo configuration (deeplinks included)
-├── package.json
-└── tsconfig.json
-```
-
-## Deep Links
-
-### Custom Scheme
-- Scheme: `wene`
-- Format: `wene://r/<campaignId>?code=...`
-- Example: `wene://r/demo-campaign?code=demo-invite`
-
-### Universal Links / App Links (HTTPS)
-- URL: `https://wene.app/r/<campaignId>?code=...`
-- Example: `https://wene.app/r/demo-campaign?code=demo-invite`
-- iOS: Universal Links (associatedDomains configured)
-- Android: App Links (intentFilters configured)
-
-## Universal Links / App Links Configuration
-
-### iOS: Apple App Site Association (AASA)
-
-**Why it's needed:**
-To enable Universal Links on iOS, you need to place an AASA file at the root of your domain (wene.app). iOS validates this file to confirm the app can handle links from that domain.
-
-**Location:**
-- `https://wene.app/.well-known/apple-app-site-association`
-- Must be accessible via HTTPS
-- Must be served with Content-Type: `application/json`
-
-**Required content:**
-```json
-{
-  "applinks": {
-    "apps": [],
-    "details": [
-      {
-        "appID": "TEAM_ID.jp.wene.app",
-        "paths": ["/r/*"]
-      }
-    ]
-  }
-}
-```
-- `TEAM_ID`: Your Apple Developer account Team ID (10 alphanumeric characters)
-- `paths`: Path patterns the app handles (`/r/*` handles all paths starting with /r/)
-
-### Android: Digital Asset Links (assetlinks.json)
-
-**Why it's needed:**
-To enable App Links on Android, you need to place an assetlinks.json file at the root of your domain (wene.app). Android validates this file to confirm the app can handle links from that domain.
-
-**Location:**
-- `https://wene.app/.well-known/assetlinks.json`
-- Must be accessible via HTTPS
-- Must be served with Content-Type: `application/json`
-
-**Required content:**
-```json
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "jp.wene.app",
-    "sha256_cert_fingerprints": [
-      "SHA256_FINGERPRINT"
-    ]
-  }
-}]
-```
-- `package_name`: `jp.wene.app` as configured in app.config.ts
-- `sha256_cert_fingerprints`: SHA256 fingerprint of your app's signing certificate (both release and debug can be configured)
-
-**Getting the fingerprint:**
-```bash
-# For release keystore
-keytool -list -v -keystore your-release-key.keystore -alias your-key-alias
-
-# For debug keystore
-keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android
-```
-
-**Notes:**
-- Both AASA and assetlinks.json must be served via HTTPS with correct Content-Type headers
-- Files must be directly accessible without redirects
-- iOS caches AASA files, so changes may take time to reflect
-- Android validates App Links at runtime, requiring internet connection on first launch
-
-## Screen Specifications
-
-### Home Screen (app/index.tsx)
-- White background
-- Title: "We-ne"
-- Description: "Receive support credits"
-- Demo link button
-
-### Claim Screen (app/r/[campaignId].tsx)
-- Gets `campaignId` and `code` from URL parameters
-- Displays information in card format
-- "Claim" button
-
-## Design Rules
-
-- Black, white, and gray only
-- No shadows
-- Slightly large border radius (16px)
-- One action per screen
-
-## App Icon
-
-### Custom Icon Setup
-
-1. Save your icon image as `assets/icon-source.png` (1024x1024 recommended)
-2. Run the icon generation script:
-```bash
-npm run generate-icons
-```
-
-This generates:
-- `icon.png` - Main app icon
-- `adaptive-icon.png` - Android adaptive icon
-- `favicon.png` - Web favicon
-- `splash.png` - Splash screen image
-
-### Deploy to Device via ADB
-
-```bash
-npm run deploy:adb
-```
-
-This script:
-1. Generates icons from `icon-source.png`
-2. Runs prebuild (reflects icons in Android resources)
-3. Builds APK
-4. Installs to connected device via ADB
-
-## Building APK
-
-### Prerequisites
-
-- **Java 17**: Gradle 8 doesn't support Java 25, so use Java 17.
-  - macOS (Homebrew): `brew install openjdk@17`
-- **Android SDK**: Requires `platform-tools`, `platforms;android-36`, `build-tools;36.0.0`.
-  - macOS (Homebrew): `brew install --cask android-commandlinetools`, then install the above via `sdkmanager`.
-- Set `ANDROID_HOME` and `JAVA_HOME` if not already configured.
-
-### Steps
-
-```bash
-# 1. First time only: Generate native Android project
-npm run build:prebuild
-
-# 2. Build APK (uses Java 17 and Android SDK)
-npm run build:apk
-```
-
-Output: `android/app/build/outputs/apk/release/app-release.apk`
-
-If you installed Java 17 and Android command-line tools via Homebrew, `npm run build:apk` should work directly. For different paths, set `JAVA_HOME` and `ANDROID_HOME` before building.
-
-### If Terminal Closes / Retrying Build
-
-Open a **new terminal** and run:
-
-```bash
+# From repo root
 cd wene-mobile
-./scripts/build-apk.sh
-# or
-npm run build:apk
-```
-
-### APK Installation Notes
-
-**If updates don't reflect:**
-
-1. **Uninstall existing app**
-   - Settings > Apps > wene-mobile (or jp.wene.app) > Uninstall
-   - Or `adb uninstall jp.wene.app` (when connected via USB)
-
-2. **Install new APK**
-   - Open APK in file manager
-   - Or `adb install android/app/build/outputs/apk/release/app-release.apk`
-
-**Reasons:**
-- Android won't recognize as update if `versionCode` is the same
-- Can't overwrite if signed differently (e.g., installed via Expo Go)
-- `app.config.ts` auto-updates `versionCode`, but uninstall may be needed for older versions
-
-## iOS Local Build (Simulator)
-
-### Prerequisites
-
-- **Xcode app** must be installed (from App Store, ~12GB)
-- Command Line Tools alone is insufficient
-- After installation: Run `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
-
-**Verification:**
-```bash
-xcode-select -p
-# Correct: /Applications/Xcode.app/Contents/Developer
-# Wrong: /Library/Developer/CommandLineTools (Xcode app needed)
-```
-
-### Local Build Steps
-
-```bash
-cd wene-mobile
-./scripts/build-ios.sh
-# or
-npm run build:ios
-```
-
-- First run executes `expo prebuild --platform ios --clean` equivalent (if `ios/` doesn't exist).
-- Then `expo run:ios` builds and launches on Simulator.
-
-**If terminal closes / retrying:** Open a new terminal and re-run the commands above.
-
-### Without Xcode Installed / EAS Build (iOS TestFlight & Android APK)
-
-**Distribution (school PoC):** Students use the dedicated app — iOS via TestFlight, Android via APK. Web is for admin/auxiliary use only.
-
-**EAS Build:**
-```bash
-# 1. Install EAS CLI and login
-npm install -g eas-cli
-eas login
-
-# 2. iOS: Production build for TestFlight (first run may prompt for credentials)
-eas build --platform ios --profile production
-# Then submit: eas submit --platform ios --profile production
-
-# 3. Android: APK build (no Play Store)
-eas build --platform android --profile production
-# Output: APK download from EAS dashboard
-```
-
-- **iOS**: `production` profile uses `distribution: "store"`. Run `eas build --platform ios --profile production` in **interactive** mode once to set up credentials; after that, builds work with `--non-interactive`. Submit via `eas submit --platform ios --profile production`.
-- **Android**: `production` profile outputs APK; download from EAS dashboard and distribute (no Play Store).
-- Project is linked via `app.config.ts` → `extra.eas.projectId`.
-
-## Notes: Phantom & devnet (claim flow)
-
-- **Phantom mobile blocks signing** if the transaction is interpreted as mainnet (e.g. warning: "valid transaction found on mainnet").
-- **Always ensure:**
-  - RPC endpoint = **devnet** (e.g. `https://api.devnet.solana.com`).
-  - Phantom deeplink includes **`cluster=devnet`** (both in the Phantom API URL and in the redirect URL, e.g. `wene://phantom/sign?cluster=devnet`).
-- **Android APK build verified end-to-end:** build → Phantom connect → Phantom sign → transaction send & confirm → token receipt (claim success).
-
-### Build & install (quick reference)
-
-```bash
-# Clean rebuild (if needed)
-npm run android:clean-rebuild
-
-# Build APK
 npm run build:apk
 
-# Install to device (USB debugging)
-adb install android/app/build/outputs/apk/release/app-release.apk
-# Or use: npm run deploy:adb (build + install) / npm run deploy:adb:clean (uninstall + install)
+# Output:
+# android/app/build/outputs/apk/release/app-release.apk
 ```
+
+---
 
 ## Troubleshooting
 
-### Updates Not Reflecting on Android via Expo Go
+Use the built-in doctor script:
 
-Try these steps in order:
-
-#### Method 1: Clear Cache (Recommended)
 ```bash
-npm run start:clear
-# or
-npm run android:clear
+npm run doctor
+npm run doctor:fix
 ```
 
-#### Method 2: Full Reset (if Method 1 doesn't work)
+The doctor checks: dependencies, polyfills, SafeArea configuration, Phantom integration, Android SDK setup, and more.
+
+---
+
+## Build Smart Contract
+
 ```bash
-npm run start:reset
-# or
-npm run android:reset
+cd grant_program
+anchor build
+anchor test
 ```
 
-#### Method 3: Delete All Caches (if Method 2 doesn't work)
-```bash
-npm run clean
+→ Full setup: `docs/DEVELOPMENT.md`
+
+---
+
+## 📁 Repository Structure
+
+```
+we-ne/
+├── grant_program/           # Solana smart contract (Anchor)
+│   ├── programs/grant_program/src/lib.rs   # Core logic
+│   └── tests/               # Integration tests
+│
+├── wene-mobile/             # Mobile app (React Native + Expo)
+│   ├── app/                 # Screens (Expo Router)
+│   ├── src/solana/          # Blockchain client
+│   ├── src/wallet/          # Phantom adapter
+│   └── src/utils/phantom.ts # Deep link encryption
+│
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md      # System design
+│   ├── SECURITY.md          # Threat model
+│   ├── PHANTOM_FLOW.md      # Wallet integration
+│   ├── DEVELOPMENT.md       # Dev setup
+│   └── ROADMAP.md           # Future plans
+│
+├── .github/workflows/       # CI/CD
+├── LICENSE                  # MIT
+├── CONTRIBUTING.md          # Contribution guide
+└── SECURITY.md              # Vulnerability reporting
 ```
 
-Then on your Android device:
-1. **Completely close Expo Go**
-   - Swipe Expo Go away from recent apps
-   - Or Settings > Apps > Expo Go > Force Stop
+---
 
-2. **Restart Expo Go**
-   - Reopen the app and scan QR code to reconnect
+## 🔐 Security Model
 
-3. **Manual Reload**
-   - In Expo Go, shake device or select "Reload" from menu
+| Aspect         | Implementation                                  |
+| -------------- | ----------------------------------------------- |
+| Key custody    | Non-custodial — keys never leave Phantom wallet |
+| Session tokens | Encrypted with NaCl box, stored in app sandbox  |
+| Double-claim   | Prevented by on-chain ClaimReceipt PDA          |
+| Deep links     | Encrypted payloads, strict URL validation       |
 
-#### Method 4: Check Network Connection
-- Ensure Android device and development machine are on the same Wi-Fi network
-- Check if firewall or VPN is blocking connection to dev server
-- For USB debugging: Run `adb reverse tcp:8081 tcp:8081`
+⚠️ **Audit Status:** NOT AUDITED — use at own risk for testing only
 
-#### Method 5: Check Dev Server Logs
-- Check terminal for error messages from dev server
-- Check Expo Go app logs on Android device (Settings > Debug > Show Logs)
+→ Full threat model: `docs/SECURITY.md`
 
-#### Additional Notes
-- `app.config.ts` auto-updates version during development, no manual changes needed
-- If still not updating, try reinstalling Expo Go itself
+---
+
+## 🗺️ Roadmap
+
+| Phase           |   Timeline | Deliverables                          |
+| --------------- | ---------: | ------------------------------------- |
+| MVP             | ✅ Complete | Basic claim flow, Phantom integration |
+| Allowlist       |   +2 weeks | Merkle-based eligibility              |
+| Admin Dashboard |   +1 month | Web UI for grant creators             |
+| Mainnet Beta    |  +3 months | Audit, partners, production deploy    |
+
+→ Full roadmap: `docs/ROADMAP.md`
+
+---
+
+## 💡 Why Solana? Why Now? Why Foundation Grant?
+
+### Why Solana?
+
+* Speed: sub-second finality for real-time support
+* Cost: ~$0.001/tx makes micro-grants viable
+* Ecosystem: Phantom, SPL tokens, developer tools
+* Japan presence: growing Solana community in Japan
+
+### Why Now?
+
+* Japan exploring digital benefit distribution
+* Post-COVID interest in efficient aid delivery
+* Mobile wallet adoption accelerating
+
+### Why Foundation Grant?
+
+* Novel use case: public benefit infrastructure (not DeFi/NFT)
+* Real-world impact: designed for actual support programs
+* Open source: MIT licensed, reusable components
+* Japan market: local team, local partnerships
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! See `CONTRIBUTING.md`.
+
+Priority areas:
+
+* Testing coverage
+* Documentation translations
+* Security review
+* UI/UX feedback
+
+---
+
+## 📜 License
+
+MIT License — free to use, modify, and distribute.
+See `LICENSE`.
+
+---
+
+## 📋 Recent changes (third-party build improvements)
+
+To make the project easier to build and verify for contributors and third parties:
+
+* Root-level scripts: Added `package.json` at repo root with:
+
+  * `npm run build` (contract + mobile typecheck)
+  * `npm run test` (Anchor tests)
+  * `npm run build:contract`, `npm run build:mobile`, `npm run test:contract` for per-component runs
+* Unified build script: Added `scripts/build-all.sh` so you can run `./scripts/build-all.sh all` (or build / test) without installing Node at root
+* Third-party build verification: Confirmed the above steps build and test successfully in a fresh environment
+* Mobile peer dependency handling:
+
+  * `wene-mobile/.npmrc (legacy-peer-deps=true)`
+  * `--legacy-peer-deps` in root scripts and CI
+* CI: Added `.github/workflows/ci.yml` so every push/PR runs Anchor build & test and mobile install & TypeScript check
+* Docs: `docs/DEVELOPMENT.md` updated with root-level build/test and CI usage
+* Double-claim fix: In `grant_program`, the claim receipt account was changed from `init_if_needed` to `init`. This correctly rejects a second claim in the same period (receipt PDA already exists, so init fails). All Anchor tests, including "claimer can claim once per period", now pass.
+
+---
+
+## 📞 Contact
+
+* Issues: [https://github.com/hk089660/-instant-grant-core/issues](https://github.com/hk089660/-instant-grant-core/issues)
+* Discussions: [https://github.com/hk089660/-instant-grant-core/discussions](https://github.com/hk089660/-instant-grant-core/discussions)
+* Security: See `SECURITY.md` for vulnerability reporting
+
+Built with ❤️ for public good on Solana
