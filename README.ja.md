@@ -1,156 +1,82 @@
 # We-ne (instant-grant-core)
 
-Solana上の**非保管型 支援配布 / 参加券**を対象にした、オープンソースの public-good プロトタイプです。
+審査向けのプロトタイプ / 評価キットです。Solana上で、非保管型の配布と学校向け参加券フローを、再現可能な検証手順つきで提供します。
 
-> ステータス（2026年2月11日時点）: **PoC / devnet-first**。本番mainnet運用ではなく、再現性と第三者検証を重視しています。
+## 概要（One-liner）
 
-[English README](./README.md) | [Architecture](./docs/ARCHITECTURE.md) | [Devnet Setup](./docs/DEVNET_SETUP.md) | [Security](./docs/SECURITY.md)
+We-ne は、支援配布を監査しやすくし、運用しやすくすることを狙った非保管型プロトタイプです。
 
-## Problem
-給付・参加証明系の仕組みは、次の5点で詰まりやすいです。
+- claim署名はウォレット側で実行（アプリは秘密鍵を保管しない）
+- オンチェーン `ClaimReceipt` PDA で二重claimを防止（同一期間）
+- トランザクション / receipt をExplorerで第三者検証できる
 
-- 承認から受取までが遅い
-- 少額支援ほど運用コストが重い
-- 第三者監査のしやすさが弱い
-- 重複claimや不正参加の圧力がある
-- 過剰な個人情報要求によるプライバシーリスクがある
+## 解決したい課題
 
-## Solution
-We-ne は次の2レイヤーで解決します。
+- 配布オペレーションの遅さ・不透明さ
+- 少額支援での高い運用コスト
+- 第三者監査のしづらさ
+- 重複claimなどの濫用リスク
+- 不要な個人情報収集によるプライバシー圧力
 
-- **オンチェーン非保管 claim フロー（Solana devnet）**
-- **学校PoC向け運用フロー（QR参加導線 + API）**
+## 現在のPoCステータス
 
-設計原則:
+- Devnet E2E claimフローを実装（`/r/demo-campaign?code=demo-invite`）
+- 学校PoCフローを実装（`/admin` + `/u/*`）
+- 管理者印刷ルート: `/admin/print/<eventId>` で `/u/scan?eventId=...` のQRを生成
+- 利用者フロー: `/u/scan` -> `/u/confirm` -> `/u/success`
+- 再claim時の挙動: `alreadyJoined` を返し、UI上は運用完了として扱う
+- Success画面は tx / receipt が渡された場合に Explorer リンクを表示
 
-- 受給者が鍵を保持（署名はwallet側、アプリは秘密鍵を持たない）
-- オンチェーン `ClaimReceipt` PDA で期間内1回claimを強制
-- Explorerで第三者が検証できる監査導線
-- 当日運用しやすいUX（印刷QR、confirm/success、already時も運用上完了）
+## デモ / 再現手順（1ページ）
 
-## What Is Built Now (Fact-Based)
+1. 管理者イベント一覧を開く: `/admin`
+2. （任意）イベント詳細を開く: `/admin/events/<eventId>`
+3. 印刷ページを開く: `/admin/print/<eventId>`
+4. QR遷移先が `/u/scan?eventId=<eventId>` であることを確認
+5. 利用者側でそのURLを開く（スマホカメラ / QRリーダー推奨）
+6. 確認ページへ進む: `/u/confirm?eventId=<eventId>`
+7. 参加処理後に成功ページへ到達: `/u/success?eventId=<eventId>`
+8. tx/receipt がある場合、Explorerで確認:
+   - Tx: `https://explorer.solana.com/tx/<signature>?cluster=devnet`
+   - Receipt: `https://explorer.solana.com/address/<receiptPubkey>?cluster=devnet`
 
-- **Anchor grant program**: `./grant_program/programs/grant_program/src/lib.rs`
-- `ClaimReceipt` PDA による二重claim防止（grant + claimer + period index をseed化）
-- devnet program ID をコードと Anchor config で固定（`GZcUoGHk8SfAArTKicL1jiRHZEQa3EuzgYcC2u4yWfSR`）
-- **学校PoC UIルート**実装済み:
-  - `/admin`（イベント一覧）
-  - `/admin/print/[eventId]`（印刷QR + event ID文字表示）
-  - `/u/scan` -> `/u/confirm?eventId=...` -> `/u/success?eventId=...`
-- **学校API**実装済み（ローカルサーバ / Workers 両対応）:
-  - `GET /v1/school/events`
-  - `GET /v1/school/events/:eventId`
-  - `POST /v1/school/claims`
-  - `POST /api/users/register`
-- **Cloudflare Pages proxy対策導線**実装済み:
-  - `npm run export:web` で `dist` 生成 + `scripts/gen-redirects.js` 実行
-  - `_redirects` に `/api/*` `/v1/*` proxy と SPA fallback を生成
-- **検証資産**が存在:
-  - `./wene-mobile/scripts/verify-pages-build.sh`
-  - `./wene-mobile/scripts/gen-redirects.js`
-  - `./api-worker/test/claimPersistence.test.ts`
-  - `./wene-mobile/server/__tests__/schoolApi.test.ts`
+再claim時の補足:
 
-### Important Current Constraints
+- School API経路: 同一subjectは `alreadyJoined`（重複カウント増加なし）
+- オンチェーン経路: `ClaimReceipt` PDA により同一期間の重複支払いを防止
 
-- Solana claim検証は devnet 前提
-- PoC は未監査
-- 学校向け `/u/scan` は現在カメラ部分がモックで、URLベースの遷移を使う（`/u/scan?eventId=...`）
-- schoolモードの運用フローと Solana walletフローは、同一リポジトリ内の別ランタイム経路
-
-## Demo (Fastest Review Path)
-
-### A. School PoC Demo (QR -> confirm -> success)
-
-1. 管理画面 `/admin` を開く
-2. 印刷画面 `/admin/print/evt-001` を開く
-3. `/u/scan?eventId=evt-001` を含むQRを印刷（またはPDF保存）
-4. 利用者側でQR URLを開く
-5. `/u/confirm?eventId=evt-001` へ進む
-6. 参加処理後に `/u/success?eventId=evt-001` 到達
-
-すでに実装されている運用挙動:
-
-- `alreadyJoined` でも完了扱い（現場の詰まりを減らす）
-- `published` 状態での参加制御あり
-- リトライ可能エラー分岐あり（`evt-003`）
-
-### B. Solana Devnet E2E Claim (wallet sign -> send -> Explorer)
-
-- ルート: `/r/demo-campaign?code=demo-invite`
-- フロー: Phantom connect -> sign transaction -> send -> tx表示
-- Explorer確認リンク形式:
-  - `https://explorer.solana.com/tx/<signature>?cluster=devnet`
-- Receiptアカウントはオンチェーンロジックで生成（ClaimReceipt PDA）。seed設計と挙動は `grant_program` テストで検証
-
-## Repro / Verify (Copy-Paste)
-
-### 1) ローカルAPI / Workerロジックテスト
+## クイックスタート（ローカル）
 
 ```bash
-# School API integration tests
+cd wene-mobile
+npm i
+EXPO_PUBLIC_API_MODE=http EXPO_PUBLIC_API_BASE_URL="http://localhost:8787" npm run dev:full
+```
+
+- `dev:full` でローカルAPI（`:8787`）とWeb UIを同時起動
+- 表示されたWeb URLを開き、上のデモ手順を実施
+
+任意のローカル検証:
+
+```bash
 cd wene-mobile
 npm run test:server
 
-# Worker claim persistence tests
 cd ../api-worker
 npm test
 ```
 
-### 2) Devnet Grant Setup（オンチェーンclaimデモ用）
+## クイックスタート（Cloudflare Pages）
 
-```bash
-cd grant_program
-yarn devnet:setup
-```
+モノレポ構成のため、Pagesのビルドルートは `wene-mobile` です。
 
-出力された `_RAW` を `./wene-mobile/src/solana/devnetConfig.ts` に貼り付けます。
+重要要件:
 
-詳細: `./docs/DEVNET_SETUP.md`
+- `export:web` は `scripts/gen-redirects.js` を実行
+- export時に `EXPO_PUBLIC_API_BASE_URL`（または `EXPO_PUBLIC_SCHOOL_API_BASE_URL`）が必須
+- 未設定だと redirects が不正になり、`/api/*` / `/v1/*` が Pages 直撃（405 / HTML）しやすい
 
-### 3) Pages Deploy Verification Chain（必須）
-
-```bash
-cd wene-mobile
-npm run export:web
-npm run deploy:pages
-npm run verify:pages
-```
-
-`verify:pages` は本番ルーティング不整合を早期に落とすための検証です。主に次を確認します。
-
-- ローカル `dist` JS bundle hash と本番 `/admin` bundle hash の一致
-- `/v1/school/events` が PagesのHTMLではなく API系レスポンス（JSON）であること
-- `POST /api/users/register` が **`405 Method Not Allowed` ではない**こと
-
-期待される挙動:
-
-- 成功時は `OK:` ログを出して `0` 終了
-- 失敗時は `FAIL:` ログを出して非0終了
-
-### 4) API到達の手動確認（curl）
-
-```bash
-BASE="https://<your-pages-domain>"
-
-# HTTP 200 かつ content-type に application/json を含むこと
-curl -sS -D - "$BASE/v1/school/events" -o /tmp/wene_events.json | sed -n '1p;/content-type/p'
-head -c 160 /tmp/wene_events.json && echo
-
-# 405 でないこと（400/401/200 はバリデーション/認証条件により許容）
-curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
-  -H 'Content-Type: application/json' \
-  -d '{}' \
-  "$BASE/api/users/register"
-```
-
-`/v1/school/events` が `text/html` になったり、`/api/users/register` が `405` なら、APIパスが Pages 側に誤着弾しています（proxy設定不整合）。
-
-## Deployment (Cloudflare Pages + Workers)
-
-### 推奨: Wranglerベースのデプロイ
-
-1. Worker API をデプロイ:
+Workerデプロイ:
 
 ```bash
 cd api-worker
@@ -158,83 +84,60 @@ npm i
 npm run deploy
 ```
 
-2. Pages の環境変数を設定:
-
-- `EXPO_PUBLIC_API_MODE=http`
-- `EXPO_PUBLIC_API_BASE_URL=https://<your-worker>.workers.dev`
-- `EXPO_PUBLIC_BASE_URL=https://<your-pages>.pages.dev`
-
-3. `./wene-mobile` から build + deploy:
+Pages build + deploy + verify:
 
 ```bash
-npm run export:web
+cd wene-mobile
+EXPO_PUBLIC_API_BASE_URL="https://<your-worker>.workers.dev" npm run export:web
 npm run deploy:pages
+npm run verify:pages
 ```
 
-理由:
+## 検証コマンド
 
-- `scripts/gen-redirects.js` が proxy安全な `dist/_redirects` を生成
-- `/api/*` `/v1/*` が静的Pages応答に落ちる事故を防ぐ
+`verify:pages` では次を確認します。
 
-### 非推奨: 手動ZIPアップロード
+- `/admin` のbundle SHA256 がローカル `dist` と一致
+- `GET /v1/school/events` が `200` かつ `application/json`
+- `POST /api/users/register` が **`405` ではない**
 
-手動ZIPは `_redirects` 欠落や配置ミスを起こしやすいです。`wrangler pages deploy` を推奨します。
+手動のランタイム確認:
 
-手動が必要な場合のみ `./wene-mobile/scripts/make-dist-upload-zip.sh` を使ってください。
+```bash
+BASE="https://<your-pages-domain>"
 
-## Roadmap (With a $3,000 Microgrant)
+curl -sS -D - "$BASE/v1/school/events" -o /tmp/wene_events.json | sed -n '1p;/content-type/p'
+head -c 160 /tmp/wene_events.json && echo
 
-目標: 小さく、現実的で、検証可能な改善に集中。
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{}' \
+  "$BASE/api/users/register"
+```
 
-- **Workstream 1: Verification hardening**
-  - Pages検証スクリプトの安定化
-  - reviewer向け routing/API 到達チェックを1コマンド化
-- **Workstream 2: Demo reliability**
-  - 印刷QR -> 利用者完了までの再現性向上
-  - 外部審査員向けdevnetデモ導線の安定化
-- **Workstream 3: Minimal abuse controls v0**
-  - schoolフローでの重複参加検知を強化
-  - already/retryable時の運用runbook明確化
-- **Workstream 4: Documentation for grant reviewers**
-  - READMEとdocsを実コマンドのみで同期維持
-  - テスト/スクリプト/Explorerリンクの証跡導線を明示
+## トラブルシューティング / 既知の挙動
 
-## Milestones (2-4 Weeks)
+- `/v1/*` が HTML を返す場合、proxyルーティング未適用（成果物違い or redirects欠落）
+- `/_redirects` を直接取得して404になること自体は Pages では起こりうる。上記ランタイム挙動で判定する
+- ログイン/ユーザー状態はブラウザ・端末ストレージに残ることがある。共用端末検証はプライベートブラウズ推奨
+- 現在のPoCではWebカメラ読取UIがモックのケースがあるため、`/u/scan?eventId=...` をスマホカメラ/QRリーダーで開く方式を推奨
 
-1. **Week 1: Repro Baseline**
-- Deliverable: 検証チェックリスト更新 + ローカルテスト緑化
-- Verification: `npm run test:server`, `cd api-worker && npm test`
+## 詳細ドキュメント
 
-2. **Week 2: Pages/Workers Reliability**
-- Deliverable: deploy + proxy検証の再現可能化
-- Verification: `npm run export:web && npm run deploy:pages && npm run verify:pages`
+- `wene-mobile/docs/CLOUDFLARE_PAGES.md`
+- `wene-mobile/README_SCHOOL.md`
+- `docs/DEVNET_SETUP.md`
+- `docs/ARCHITECTURE.md`
+- `api-worker/README.md`
 
-3. **Week 3: Demo Packaging for Reviewers**
-- Deliverable: school PoC + devnet claim の短い審査員用実演手順
-- Verification: `/admin/print/evt-001` -> `/u/success` 導線 + devnet explorer tx確認
+## 審査向けコンテキスト
 
-4. **Week 4: Abuse-Resilience v0 + Docs Finalization**
-- Deliverable: エッジケース運用資料とテスト整備
-- Verification: テスト更新 + クリーン環境でrunbook再現
+このリポジトリは本番mainnet向け製品ではなく、プロトタイプ/評価キットです。
 
-## Why This Fits a Microgrant
+- 目的: 審査者が再現し、独立して検証できること
+- グラント文脈: 最小限。運用検証・技術検証を優先
+- public-good 方針: オープンソース、監査可能性、非保管設計
 
-- MITライセンスの open-source public good
-- **sub-$10k / microgrant** で完遂可能な、実証寄りスコープ
-- 過剰な機能拡張より、再現性・運用性・監査可能性を優先
+## ライセンス
 
-## Links
-
-- Public demo URL (Pages): [https://we-ne-school-ui.pages.dev](https://we-ne-school-ui.pages.dev)
-- School PoC guide: `./wene-mobile/README_SCHOOL.md`
-- Cloudflare Pages setup: `./wene-mobile/docs/CLOUDFLARE_PAGES.md`
-- Worker API details: `./api-worker/README.md`
-- Devnet setup guide: `./docs/DEVNET_SETUP.md`
-- Architecture: `./docs/ARCHITECTURE.md`
-- Security model: `./docs/SECURITY.md`
-- GitHub issues: [https://github.com/hk089660/instant-grant-core/issues](https://github.com/hk089660/instant-grant-core/issues)
-- GitHub pull requests: [https://github.com/hk089660/instant-grant-core/pulls](https://github.com/hk089660/instant-grant-core/pulls)
-
----
-
-短い補足: このREADMEは「いま再現できる手順」と「第三者検証できる導線」を優先して更新しています。PoC段階のため、mainnet本番運用を断定する記述は避けています。
+MIT（`/LICENSE`）
